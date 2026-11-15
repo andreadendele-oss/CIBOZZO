@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   MapPin, Utensils, Navigation, Plus, ExternalLink, 
   SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle, 
-  MoreVertical, Trash2 
+  MoreVertical, Trash2, Globe
 } from "lucide-react";
 
 export default function Home() {
@@ -19,7 +19,7 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [isUnlimitedView, setIsUnlimitedView] = useState(false);
   const [successToast, setSuccessToast] = useState("");
-  const [activeMenuId, setActiveMenuId] = useState(null); // Menu 3 puntini
+  const [activeMenuId, setActiveMenuId] = useState(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -75,7 +75,6 @@ export default function Home() {
     );
   }
 
-  // Eliminazione locale dal database
   async function handleDeleteRestaurant(id, name) {
     if (!confirm(`Sei sicuro di voler eliminare "${name}"?`)) return;
 
@@ -90,7 +89,6 @@ export default function Home() {
     }
   }
 
-  // Salva nuovo locale con fallback intelligente coordinate
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city) return;
@@ -100,12 +98,10 @@ export default function Home() {
     let longitude = null;
 
     try {
-      // 1. Cerca Nome + Città
       let query = encodeURIComponent(`${formData.name}, ${formData.city}`);
       let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
       let geo = await res.json();
 
-      // 2. Fallback: se non trova il locale, cerca almeno la città!
       if (!geo || geo.length === 0) {
         query = encodeURIComponent(formData.city);
         res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
@@ -151,42 +147,46 @@ export default function Home() {
 
   const categories = useMemo(() => ["Tutte", ...new Set(restaurants.map((r) => r.category.trim()))], [restaurants]);
 
-  // FILTRO MATEMATICO RIGIDO
+  // FILTRO LOGICO RIGOROSO (<= 300km in Home, > 300km in Senza Limiti)
   const filtered = useMemo(() => {
     return restaurantsWithDist
       .filter((r) => {
-        // Controllo Categoria ferreo
         const matchCategory =
           selectedCategory === "Tutte" ||
           r.category.trim().toLowerCase() === selectedCategory.trim().toLowerCase();
 
-        // Controllo Stato
         const matchStatus = selectedStatus === "tutti" || r.status === selectedStatus;
 
         if (!matchCategory || !matchStatus) return false;
 
-        // Se siamo nella vista normale con posizione attiva, filtra rigorosamente per km
-        if (userLocation && !isUnlimitedView) {
-          if (r.distKm === null) return false; // Se non ha distanza, non mostrarlo nei filtri a km
+        // VISTA "SENZA LIMITI": SOLO E SOLTANTO OLTRE I 300 KM!
+        if (isUnlimitedView) {
+          if (!userLocation) return true; // Mostra tutto se posizione non ancora attiva
+          return r.distKm !== null && r.distKm > 300;
+        }
+
+        // VISTA RADAR (DARK): LOCALI NEL RAGGIO DELLO SLIDER (MAX 300 KM)
+        if (userLocation) {
+          if (r.distKm === null) return false;
           return r.distKm <= maxDistance;
         }
 
         return true;
       })
       .sort((a, b) => {
-        if (!userLocation || isUnlimitedView) return 0;
+        if (!userLocation) return 0;
         return (a.distKm ?? 99999) - (b.distKm ?? 99999);
       });
   }, [restaurantsWithDist, selectedCategory, selectedStatus, userLocation, maxDistance, isUnlimitedView]);
 
-  // Locali oltre il raggio impostato
-  const hiddenDueToDistance = useMemo(() => {
-    if (!userLocation || isUnlimitedView) return 0;
-    return restaurantsWithDist.filter((r) => r.distKm !== null && r.distKm > maxDistance).length;
-  }, [restaurantsWithDist, userLocation, maxDistance, isUnlimitedView]);
+  // Conta quanti locali sono oltre i 300 km per la notifica
+  const over300KmCount = useMemo(() => {
+    if (!userLocation) return 0;
+    return restaurantsWithDist.filter((r) => r.distKm !== null && r.distKm > 300).length;
+  }, [restaurantsWithDist, userLocation]);
 
   // ==========================================
-  // VISTA 2: BORDEAUX & PANNA SPORCA (SENZA LIMITI)
+  // VISTA 2: BORDEAUX & PANNA SPORCA (> 300 KM)
   // ==========================================
   if (isUnlimitedView) {
     return (
@@ -220,10 +220,10 @@ export default function Home() {
               </div>
 
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mt-2 text-[#581825]">
-                CIBOZZO • SENZA LIMITI
+                CIBOZZO • GRANDI VIAGGI
               </h1>
               <p className="text-xs text-[#7D3C4D] mt-1 font-sans">
-                Tutti i {restaurants.length} locali salvati, senza vincoli di distanza.
+                Mostra <strong>esclusivamente</strong> i locali a più di 300 km da te.
               </p>
             </div>
 
@@ -231,9 +231,22 @@ export default function Home() {
               onClick={() => setIsUnlimitedView(false)}
               className="flex items-center gap-2 bg-[#581825] text-[#F4EFEA] hover:bg-[#722334] px-4 py-2.5 rounded-xl text-xs font-sans font-bold transition shadow-sm cursor-pointer"
             >
-              <ArrowLeft className="h-4 w-4" /> Torna al Radar
+              <ArrowLeft className="h-4 w-4" /> Torna al Radar (Entro 300km)
             </button>
           </header>
+
+          {/* Banner se la posizione non è attiva */}
+          {!userLocation && (
+            <div className="bg-[#E7DFD5] p-3 rounded-xl text-xs font-sans text-[#581825] flex items-center justify-between">
+              <span>📍 Attiva la posizione per calcolare i locali oltre 300 km da te.</span>
+              <button 
+                onClick={handleGetLocation} 
+                className="font-bold underline cursor-pointer"
+              >
+                {locating ? "Localizzo..." : "Attiva Ora"}
+              </button>
+            </div>
+          )}
 
           {/* Filtri Categoria Bordeaux */}
           <section className="flex gap-2 overflow-x-auto pb-2 scrollbar-none font-sans">
@@ -255,10 +268,11 @@ export default function Home() {
             ))}
           </section>
 
-          {/* Lista Locali */}
+          {/* Lista Locali (>300km) */}
           {filtered.length === 0 ? (
             <div className="text-center py-16 text-[#8B263E] border-2 border-dashed border-[#E7DFD5] rounded-2xl font-sans">
-              Nessun locale trovato per la categoria "{selectedCategory}".
+              <Globe className="h-8 w-8 mx-auto mb-2 opacity-40" />
+              Nessun locale salvato a più di 300 km da te per la categoria "{selectedCategory}".
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
@@ -276,7 +290,6 @@ export default function Home() {
                           {r.status === "provato" ? "Provato" : "Da Provare"}
                         </span>
                         
-                        {/* TASTO 3 PUNTINI */}
                         <div className="relative">
                           <button
                             onClick={(e) => {
@@ -288,7 +301,6 @@ export default function Home() {
                             <MoreVertical className="h-4 w-4" />
                           </button>
                           
-                          {/* Menu a comparsa elimina */}
                           {activeMenuId === r.id && (
                             <div className="absolute right-0 top-7 z-20 bg-white border border-[#E7DFD5] shadow-lg rounded-xl p-1 w-32">
                               <button
@@ -325,7 +337,9 @@ export default function Home() {
 
                   <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs">
                     {r.distKm !== null ? (
-                      <span className="font-mono font-bold text-[#8B263E]">📍 {r.distKm} km da te</span>
+                      <span className="font-mono font-bold text-[#8B263E] bg-[#581825]/10 px-2 py-0.5 rounded-md">
+                        ✈️ {r.distKm} km da te
+                      </span>
                     ) : (
                       <span className="text-[#A56B77]">Distanza sconosciuta</span>
                     )}
@@ -350,7 +364,7 @@ export default function Home() {
   }
 
   // ==========================================
-  // VISTA 1: VERSIONE SCURA DI DEFAULT
+  // VISTA 1: VERSIONE SCURA DI DEFAULT (<= 300 KM)
   // ==========================================
   return (
     <div 
@@ -371,12 +385,12 @@ export default function Home() {
             <h1 className="text-3xl font-extrabold flex items-center gap-2 text-amber-400">
               <Utensils className="h-8 w-8" /> CIBOZZO
             </h1>
-            <p className="text-sm text-slate-400 mt-1">La tua lista dei desideri gastronomica</p>
+            <p className="text-sm text-slate-400 mt-1">Radar gastronomico (fino a 300 km)</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={handleGetLocation}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
                 userLocation
                   ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30"
                   : "bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -387,7 +401,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition shadow-lg shadow-amber-500/20"
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition shadow-lg shadow-amber-500/20 cursor-pointer"
             >
               <Plus className="h-4 w-4" /> Aggiungi Locale
             </button>
@@ -403,7 +417,7 @@ export default function Home() {
             <div>
               <div className="text-xs text-slate-400 font-medium">Range</div>
               <div className={`text-sm font-bold font-mono ${maxDistance > 200 ? "text-purple-300" : "text-amber-400"}`}>
-                Entro {maxDistance} km {maxDistance > 200 && <span className="text-[10px] text-purple-400 font-sans ml-1">🟣 Viaggio Lungo</span>}
+                Entro {maxDistance} km {maxDistance > 200 && <span className="text-[10px] text-purple-400 font-sans ml-1">🟣 Viaggio Medio</span>}
               </div>
             </div>
           </div>
@@ -422,26 +436,28 @@ export default function Home() {
             />
           </div>
 
+          {/* Tasto "SENZA LIMITI" (>300km) */}
           <button
             onClick={() => {
+              if (!userLocation && !locating) handleGetLocation();
               setSelectedCategory("Tutte");
               setSelectedStatus("tutti");
               setIsUnlimitedView(true);
             }}
             className="group flex items-center gap-2 bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-amber-400/40 px-3 py-1.5 rounded-xl transition cursor-pointer"
-            title="Mostra tutti i locali senza limiti"
+            title="Mostra solo i locali a più di 300 km"
           >
             <div className="w-3.5 h-3.5 rounded-[3px] border border-slate-600 group-hover:border-amber-400 group-hover:bg-amber-400 transition" />
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 group-hover:text-amber-400 transition">
-              Senza Limiti
+              Senza Limiti (&gt;300km)
             </span>
           </button>
         </section>
 
-        {/* Avviso locali fuori raggio */}
-        {hiddenDueToDistance > 0 && (
+        {/* Avviso se hai locali oltre i 300 km */}
+        {over300KmCount > 0 && (
           <div className="bg-amber-950/30 border border-amber-800/40 p-3 rounded-xl text-xs text-amber-300 flex items-center justify-between">
-            <span>💡 C'è <strong>{hiddenDueToDistance} locale</strong> oltre i {maxDistance} km di distanza.</span>
+            <span>✈️ Hai <strong>{over300KmCount} locale/i</strong> a più di 300 km di distanza.</span>
             <button
               onClick={() => {
                 setSelectedCategory("Tutte");
@@ -449,7 +465,7 @@ export default function Home() {
               }}
               className="underline font-bold hover:text-white cursor-pointer"
             >
-              Vedi in Senza Limiti →
+              Vedi nella sezione Senza Limiti →
             </button>
           </div>
         )}
@@ -497,7 +513,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Lista Locali */}
+        {/* Lista Locali Radar (entro 300km) */}
         {loading ? (
           <div className="text-center py-20 text-slate-500">Caricamento locali...</div>
         ) : filtered.length === 0 ? (
@@ -526,7 +542,6 @@ export default function Home() {
                         {r.status === "provato" ? "Provato" : "Da Provare"}
                       </span>
 
-                      {/* TASTO 3 PUNTINI */}
                       <div className="relative">
                         <button
                           onClick={(e) => {
@@ -538,7 +553,6 @@ export default function Home() {
                           <MoreVertical className="h-4 w-4" />
                         </button>
 
-                        {/* Dropdown Elimina */}
                         {activeMenuId === r.id && (
                           <div className="absolute right-0 top-7 z-20 bg-slate-900 border border-slate-800 shadow-xl rounded-xl p-1 w-32">
                             <button
