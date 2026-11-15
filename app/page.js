@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { MapPin, Utensils, Navigation, Plus, ExternalLink, SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle } from "lucide-react";
+import { 
+  MapPin, Utensils, Navigation, Plus, ExternalLink, 
+  SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle, 
+  MoreVertical, Trash2 
+} from "lucide-react";
 
 export default function Home() {
   const [restaurants, setRestaurants] = useState([]);
@@ -15,6 +19,7 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [isUnlimitedView, setIsUnlimitedView] = useState(false);
   const [successToast, setSuccessToast] = useState("");
+  const [activeMenuId, setActiveMenuId] = useState(null); // Menu 3 puntini
 
   const [formData, setFormData] = useState({
     name: "",
@@ -70,19 +75,43 @@ export default function Home() {
     );
   }
 
+  // Eliminazione locale dal database
+  async function handleDeleteRestaurant(id, name) {
+    if (!confirm(`Sei sicuro di voler eliminare "${name}"?`)) return;
+
+    const { error } = await supabase.from("restaurants").delete().eq("id", id);
+    if (!error) {
+      setActiveMenuId(null);
+      setSuccessToast(`"${name}" eliminato! 🗑️`);
+      setTimeout(() => setSuccessToast(""), 3500);
+      fetchRestaurants();
+    } else {
+      alert("Errore durante l'eliminazione: " + error.message);
+    }
+  }
+
+  // Salva nuovo locale con fallback intelligente coordinate
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city) return;
 
     setLoading(true);
-
     let latitude = null;
     let longitude = null;
 
     try {
-      const query = encodeURIComponent(`${formData.name}, ${formData.city}`);
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
-      const geo = await res.json();
+      // 1. Cerca Nome + Città
+      let query = encodeURIComponent(`${formData.name}, ${formData.city}`);
+      let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
+      let geo = await res.json();
+
+      // 2. Fallback: se non trova il locale, cerca almeno la città!
+      if (!geo || geo.length === 0) {
+        query = encodeURIComponent(formData.city);
+        res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
+        geo = await res.json();
+      }
+
       if (geo && geo.length > 0) {
         latitude = parseFloat(geo[0].lat);
         longitude = parseFloat(geo[0].lon);
@@ -113,7 +142,6 @@ export default function Home() {
     }
   }
 
-  // Pre-calcolo delle distanze
   const restaurantsWithDist = useMemo(() => {
     return restaurants.map((r) => ({
       ...r,
@@ -121,20 +149,28 @@ export default function Home() {
     }));
   }, [restaurants, userLocation]);
 
-  const categories = useMemo(() => ["Tutte", ...new Set(restaurants.map((r) => r.category))], [restaurants]);
+  const categories = useMemo(() => ["Tutte", ...new Set(restaurants.map((r) => r.category.trim()))], [restaurants]);
 
-  // Filtro lista
+  // FILTRO MATEMATICO RIGIDO
   const filtered = useMemo(() => {
     return restaurantsWithDist
       .filter((r) => {
-        const matchCategory = selectedCategory === "Tutte" || r.category === selectedCategory;
+        // Controllo Categoria ferreo
+        const matchCategory =
+          selectedCategory === "Tutte" ||
+          r.category.trim().toLowerCase() === selectedCategory.trim().toLowerCase();
+
+        // Controllo Stato
         const matchStatus = selectedStatus === "tutti" || r.status === selectedStatus;
+
         if (!matchCategory || !matchStatus) return false;
 
+        // Se siamo nella vista normale con posizione attiva, filtra rigorosamente per km
         if (userLocation && !isUnlimitedView) {
-          if (r.distKm === null) return true;
+          if (r.distKm === null) return false; // Se non ha distanza, non mostrarlo nei filtri a km
           return r.distKm <= maxDistance;
         }
+
         return true;
       })
       .sort((a, b) => {
@@ -143,7 +179,7 @@ export default function Home() {
       });
   }, [restaurantsWithDist, selectedCategory, selectedStatus, userLocation, maxDistance, isUnlimitedView]);
 
-  // Quanti locali sono nascosti per la distanza nella vista scura
+  // Locali oltre il raggio impostato
   const hiddenDueToDistance = useMemo(() => {
     if (!userLocation || isUnlimitedView) return 0;
     return restaurantsWithDist.filter((r) => r.distKm !== null && r.distKm > maxDistance).length;
@@ -154,7 +190,10 @@ export default function Home() {
   // ==========================================
   if (isUnlimitedView) {
     return (
-      <div className="min-h-screen bg-[#F4EFEA] text-[#581825] p-4 md:p-8 font-serif selection:bg-[#581825] selection:text-[#F4EFEA]">
+      <div 
+        className="min-h-screen bg-[#F4EFEA] text-[#581825] p-4 md:p-8 font-serif selection:bg-[#581825] selection:text-[#F4EFEA]"
+        onClick={() => setActiveMenuId(null)}
+      >
         <style>{`
           @keyframes driveCar {
             0% { transform: translateX(-15px); opacity: 0; }
@@ -168,7 +207,6 @@ export default function Home() {
         `}</style>
 
         <div className="max-w-4xl mx-auto space-y-6">
-          
           <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b-2 border-[#581825]/20 pb-6">
             <div>
               <div className="flex items-center gap-2">
@@ -185,7 +223,7 @@ export default function Home() {
                 CIBOZZO • SENZA LIMITI
               </h1>
               <p className="text-xs text-[#7D3C4D] mt-1 font-sans">
-                Tutti i {restaurants.length} locali salvati, senza vincoli di chilometri.
+                Tutti i {restaurants.length} locali salvati, senza vincoli di distanza.
               </p>
             </div>
 
@@ -197,43 +235,75 @@ export default function Home() {
             </button>
           </header>
 
-          {/* FILTRI CATEGORIE ANCHE NELLA PAGINA BORDEAUX */}
-          <section className="flex flex-col gap-2 font-sans">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
-                    selectedCategory === cat
-                      ? "bg-[#581825] text-[#F4EFEA] shadow-md"
-                      : "bg-[#FCFAF8] border border-[#E7DFD5] text-[#7D3C4D] hover:bg-[#E7DFD5]"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
+          {/* Filtri Categoria Bordeaux */}
+          <section className="flex gap-2 overflow-x-auto pb-2 scrollbar-none font-sans">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedCategory(cat);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                  selectedCategory.toLowerCase() === cat.toLowerCase()
+                    ? "bg-[#581825] text-[#F4EFEA] shadow-md"
+                    : "bg-[#FCFAF8] border border-[#E7DFD5] text-[#7D3C4D] hover:bg-[#E7DFD5]"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
           </section>
 
           {/* Lista Locali */}
           {filtered.length === 0 ? (
             <div className="text-center py-16 text-[#8B263E] border-2 border-dashed border-[#E7DFD5] rounded-2xl font-sans">
-              Nessun locale trovato con la categoria "{selectedCategory}".
+              Nessun locale trovato per la categoria "{selectedCategory}".
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
               {filtered.map((r) => (
                 <div
                   key={r.id}
-                  className="bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/30 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
+                  className="relative bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/30 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
                 >
                   <div>
                     <div className="flex justify-between items-start gap-2">
                       <h3 className="font-serif font-bold text-lg text-[#581825]">{r.name}</h3>
-                      <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
-                        {r.status === "provato" ? "Provato" : "Da Provare"}
-                      </span>
+                      
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
+                          {r.status === "provato" ? "Provato" : "Da Provare"}
+                        </span>
+                        
+                        {/* TASTO 3 PUNTINI */}
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(activeMenuId === r.id ? null : r.id);
+                            }}
+                            className="p-1 rounded-lg hover:bg-[#E7DFD5] text-[#581825] transition cursor-pointer"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </button>
+                          
+                          {/* Menu a comparsa elimina */}
+                          {activeMenuId === r.id && (
+                            <div className="absolute right-0 top-7 z-20 bg-white border border-[#E7DFD5] shadow-lg rounded-xl p-1 w-32">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteRestaurant(r.id, r.name);
+                                }}
+                                className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-bold transition cursor-pointer"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" /> Elimina
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1 font-medium">
@@ -283,10 +353,12 @@ export default function Home() {
   // VISTA 1: VERSIONE SCURA DI DEFAULT
   // ==========================================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans">
+    <div 
+      className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans"
+      onClick={() => setActiveMenuId(null)}
+    >
       <div className="max-w-4xl mx-auto space-y-6">
         
-        {/* Notifica di Salvataggio Successo */}
         {successToast && (
           <div className="fixed top-5 right-5 z-50 bg-emerald-500 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-sm shadow-xl flex items-center gap-2 animate-bounce">
             <CheckCircle className="h-5 w-5" /> {successToast}
@@ -322,9 +394,8 @@ export default function Home() {
           </div>
         </header>
 
-        {/* BARRA SCORREVOLE + TASTO QUADRATO "SENZA LIMITI" */}
+        {/* Barra Range km + Tasto Senza Limiti */}
         <section className="bg-slate-900/70 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
-          
           <div className="flex items-center gap-3 w-full md:w-auto">
             <div className={`p-2 rounded-lg ${maxDistance > 200 ? "bg-purple-950 text-purple-300 border border-purple-800/40" : "bg-amber-400/10 text-amber-400"}`}>
               <SlidersHorizontal className="h-5 w-5" />
@@ -351,7 +422,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Cliccando Senza Limiti azzera anche la categoria su Tutte */}
           <button
             onClick={() => {
               setSelectedCategory("Tutte");
@@ -368,7 +438,7 @@ export default function Home() {
           </button>
         </section>
 
-        {/* Avviso se ci sono locali oltre il raggio impostato */}
+        {/* Avviso locali fuori raggio */}
         {hiddenDueToDistance > 0 && (
           <div className="bg-amber-950/30 border border-amber-800/40 p-3 rounded-xl text-xs text-amber-300 flex items-center justify-between">
             <span>💡 C'è <strong>{hiddenDueToDistance} locale</strong> oltre i {maxDistance} km di distanza.</span>
@@ -377,7 +447,7 @@ export default function Home() {
                 setSelectedCategory("Tutte");
                 setIsUnlimitedView(true);
               }}
-              className="underline font-bold hover:text-white"
+              className="underline font-bold hover:text-white cursor-pointer"
             >
               Vedi in Senza Limiti →
             </button>
@@ -390,9 +460,12 @@ export default function Home() {
             {categories.map((cat) => (
               <button
                 key={cat}
-                onClick={() => setSelectedCategory(cat)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedCategory(cat);
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
-                  selectedCategory === cat
+                  selectedCategory.toLowerCase() === cat.toLowerCase()
                     ? "bg-amber-400 text-slate-950 shadow-md"
                     : "bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
                 }`}
@@ -410,7 +483,10 @@ export default function Home() {
             ].map((st) => (
               <button
                 key={st.id}
-                onClick={() => setSelectedStatus(st.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedStatus(st.id);
+                }}
                 className={`text-xs px-3 py-1 rounded-md transition cursor-pointer ${
                   selectedStatus === st.id ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"
                 }`}
@@ -433,20 +509,51 @@ export default function Home() {
             {filtered.map((r) => (
               <div
                 key={r.id}
-                className="bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
+                className="relative bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
               >
                 <div>
                   <div className="flex justify-between items-start gap-2">
                     <h3 className="font-bold text-lg text-white">{r.name}</h3>
-                    <span
-                      className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
-                        r.status === "provato"
-                          ? "bg-emerald-950 text-emerald-400 border border-emerald-800/50"
-                          : "bg-amber-950 text-amber-400 border border-amber-800/50"
-                      }`}
-                    >
-                      {r.status === "provato" ? "Provato" : "Da Provare"}
-                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                          r.status === "provato"
+                            ? "bg-emerald-950 text-emerald-400 border border-emerald-800/50"
+                            : "bg-amber-950 text-amber-400 border border-amber-800/50"
+                        }`}
+                      >
+                        {r.status === "provato" ? "Provato" : "Da Provare"}
+                      </span>
+
+                      {/* TASTO 3 PUNTINI */}
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(activeMenuId === r.id ? null : r.id);
+                          }}
+                          className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+
+                        {/* Dropdown Elimina */}
+                        {activeMenuId === r.id && (
+                          <div className="absolute right-0 top-7 z-20 bg-slate-900 border border-slate-800 shadow-xl rounded-xl p-1 w-32">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteRestaurant(r.id, r.name);
+                              }}
+                              className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-rose-400 hover:bg-rose-950/40 rounded-lg font-bold transition cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /> Elimina
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
@@ -498,7 +605,7 @@ export default function Home() {
                   <input
                     type="text"
                     required
-                    placeholder="es. I Due Cippi"
+                    placeholder="es. Da Ciro"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -511,7 +618,7 @@ export default function Home() {
                     <input
                       type="text"
                       required
-                      placeholder="es. Ristorante toscano"
+                      placeholder="es. Pizzeria, Sushi"
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -522,7 +629,7 @@ export default function Home() {
                     <input
                       type="text"
                       required
-                      placeholder="es. Saturnia"
+                      placeholder="es. Roma"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -560,7 +667,7 @@ export default function Home() {
                   <label className="text-xs text-slate-400">Note o piatto consigliato</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Bistecca alla fiorentina super!"
+                    placeholder="es. Ottima carbonara!"
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
