@@ -15,7 +15,7 @@ export default function Home() {
   const [selectedStatus, setSelectedStatus] = useState("tutti");
   const [userLocation, setUserLocation] = useState(null);
   const [locating, setLocating] = useState(false);
-  const [maxDistance, setMaxDistance] = useState(50);
+  const [maxDistance, setMaxDistance] = useState(300);
   const [showModal, setShowModal] = useState(false);
   const [isUnlimitedView, setIsUnlimitedView] = useState(false);
   const [successToast, setSuccessToast] = useState("");
@@ -25,6 +25,7 @@ export default function Home() {
     name: "",
     category: "Ristorante",
     city: "",
+    address: "",
     price_range: "€€",
     status: "da_provare",
     notes: ""
@@ -71,7 +72,11 @@ export default function Home() {
         });
         setLocating(false);
       },
-      () => setLocating(false)
+      () => {
+        alert("Impossibile rilevare la posizione o permesso negato.");
+        setLocating(false);
+      },
+      { timeout: 10000 }
     );
   }
 
@@ -85,34 +90,46 @@ export default function Home() {
       setTimeout(() => setSuccessToast(""), 3500);
       fetchRestaurants();
     } else {
-      alert("Errore durante l'eliminazione: " + error.message);
+      alert("Errore eliminazione: " + error.message);
     }
   }
 
+  // Geocodifica infallibile con indirizzo + città
   async function handleAddRestaurant(e) {
     e.preventDefault();
-    if (!formData.name || !formData.city) return;
+    if (!formData.name || !formData.city || !formData.address) {
+      alert("Compila tutti i campi obbligatori (incluso via e civico)!");
+      return;
+    }
 
     setLoading(true);
     let latitude = null;
     let longitude = null;
 
     try {
-      let query = encodeURIComponent(`${formData.name}, ${formData.city}`);
-      let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
-      let geo = await res.json();
+      // 1. Prova con Indirizzo completo + Città su OpenStreetMap
+      const fullQuery = encodeURIComponent(`${formData.address}, ${formData.city}`);
+      let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${fullQuery}`);
+      let data = await res.json();
 
-      if (!geo || geo.length === 0) {
-        query = encodeURIComponent(formData.city);
-        res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
-        geo = await res.json();
+      if (data && data.length > 0) {
+        latitude = parseFloat(data[0].lat);
+        longitude = parseFloat(data[0].lon);
+      } else {
+        // 2. Se il civico non viene trovato, cerca tramite il servizio veloce Open-Meteo sulla Città
+        const cityClean = encodeURIComponent(formData.city.trim());
+        const fallbackRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${cityClean}&count=1&language=it&format=json`
+        );
+        const fallbackData = await fallbackRes.json();
+        if (fallbackData?.results?.length > 0) {
+          latitude = fallbackData.results[0].latitude;
+          longitude = fallbackData.results[0].longitude;
+        }
       }
-
-      if (geo && geo.length > 0) {
-        latitude = parseFloat(geo[0].lat);
-        longitude = parseFloat(geo[0].lon);
-      }
-    } catch (err) {}
+    } catch (err) {
+      console.log("Errore ricerca coordinate, continuo.");
+    }
 
     const { error } = await supabase.from("restaurants").insert([
       { ...formData, latitude, longitude }
@@ -127,12 +144,13 @@ export default function Home() {
         name: "",
         category: "Ristorante",
         city: "",
+        address: "",
         price_range: "€€",
         status: "da_provare",
         notes: ""
       });
       setShowModal(false);
-      setSuccessToast("Locale salvato con successo! 🎉");
+      setSuccessToast("Locale salvato con precisione! 📍");
       setTimeout(() => setSuccessToast(""), 3500);
       fetchRestaurants();
     }
@@ -147,7 +165,6 @@ export default function Home() {
 
   const categories = useMemo(() => ["Tutte", ...new Set(restaurants.map((r) => r.category.trim()))], [restaurants]);
 
-  // FILTRO LOGICO RIGOROSO (<= 300km in Home, > 300km in Senza Limiti)
   const filtered = useMemo(() => {
     return restaurantsWithDist
       .filter((r) => {
@@ -159,15 +176,13 @@ export default function Home() {
 
         if (!matchCategory || !matchStatus) return false;
 
-        // VISTA "SENZA LIMITI": SOLO E SOLTANTO OLTRE I 300 KM!
         if (isUnlimitedView) {
-          if (!userLocation) return true; // Mostra tutto se posizione non ancora attiva
+          if (!userLocation) return true;
           return r.distKm !== null && r.distKm > 300;
         }
 
-        // VISTA RADAR (DARK): LOCALI NEL RAGGIO DELLO SLIDER (MAX 300 KM)
         if (userLocation) {
-          if (r.distKm === null) return false;
+          if (r.distKm === null) return true;
           return r.distKm <= maxDistance;
         }
 
@@ -175,15 +190,21 @@ export default function Home() {
       })
       .sort((a, b) => {
         if (!userLocation) return 0;
-        return (a.distKm ?? 99999) - (b.distKm ?? 99999);
+        const distA = a.distKm ?? 99999;
+        const distB = b.distKm ?? 99999;
+        return distA - distB;
       });
   }, [restaurantsWithDist, selectedCategory, selectedStatus, userLocation, maxDistance, isUnlimitedView]);
 
-  // Conta quanti locali sono oltre i 300 km per la notifica
   const over300KmCount = useMemo(() => {
     if (!userLocation) return 0;
     return restaurantsWithDist.filter((r) => r.distKm !== null && r.distKm > 300).length;
   }, [restaurantsWithDist, userLocation]);
+
+  const hiddenDueToSlider = useMemo(() => {
+    if (!userLocation || isUnlimitedView) return 0;
+    return restaurantsWithDist.filter((r) => r.distKm !== null && r.distKm > maxDistance && r.distKm <= 300).length;
+  }, [restaurantsWithDist, userLocation, maxDistance, isUnlimitedView]);
 
   // ==========================================
   // VISTA 2: BORDEAUX & PANNA SPORCA (> 300 KM)
@@ -235,10 +256,9 @@ export default function Home() {
             </button>
           </header>
 
-          {/* Banner se la posizione non è attiva */}
           {!userLocation && (
             <div className="bg-[#E7DFD5] p-3 rounded-xl text-xs font-sans text-[#581825] flex items-center justify-between">
-              <span>📍 Attiva la posizione per calcolare i locali oltre 300 km da te.</span>
+              <span>📍 Attiva la posizione per calcolare quali locali sono a oltre 300 km.</span>
               <button 
                 onClick={handleGetLocation} 
                 className="font-bold underline cursor-pointer"
@@ -248,7 +268,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* Filtri Categoria Bordeaux */}
           <section className="flex gap-2 overflow-x-auto pb-2 scrollbar-none font-sans">
             {categories.map((cat) => (
               <button
@@ -268,11 +287,10 @@ export default function Home() {
             ))}
           </section>
 
-          {/* Lista Locali (>300km) */}
           {filtered.length === 0 ? (
             <div className="text-center py-16 text-[#8B263E] border-2 border-dashed border-[#E7DFD5] rounded-2xl font-sans">
               <Globe className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              Nessun locale salvato a più di 300 km da te per la categoria "{selectedCategory}".
+              Nessun locale trovato a più di 300 km da te per "{selectedCategory}".
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
@@ -322,10 +340,11 @@ export default function Home() {
                       <span>{r.category}</span>
                       <span>•</span>
                       <span className="font-bold">{r.price_range}</span>
-                      <span>•</span>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="h-3 w-3" /> {r.city}
-                      </span>
+                    </div>
+
+                    <div className="text-xs text-[#7D3C4D] mt-2 flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5 text-[#581825] shrink-0" />
+                      <span>{r.address ? `${r.address}, ${r.city}` : r.city}</span>
                     </div>
 
                     {r.notes && (
@@ -341,11 +360,13 @@ export default function Home() {
                         ✈️ {r.distKm} km da te
                       </span>
                     ) : (
-                      <span className="text-[#A56B77]">Distanza sconosciuta</span>
+                      <span className="text-[#A56B77]">Distanza da definire</span>
                     )}
 
                     <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + " " + r.city)}`}
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        (r.address ? r.address + " " : "") + r.name + " " + r.city
+                      )}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
@@ -364,7 +385,7 @@ export default function Home() {
   }
 
   // ==========================================
-  // VISTA 1: VERSIONE SCURA DI DEFAULT (<= 300 KM)
+  // VISTA 1: VERSIONE SCURA DI DEFAULT (RADAR)
   // ==========================================
   return (
     <div 
@@ -385,7 +406,7 @@ export default function Home() {
             <h1 className="text-3xl font-extrabold flex items-center gap-2 text-amber-400">
               <Utensils className="h-8 w-8" /> CIBOZZO
             </h1>
-            <p className="text-sm text-slate-400 mt-1">Radar gastronomico (fino a 300 km)</p>
+            <p className="text-sm text-slate-400 mt-1">Radar gastronomico intelligente</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -415,7 +436,7 @@ export default function Home() {
               <SlidersHorizontal className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-400 font-medium">Range</div>
+              <div className="text-xs text-slate-400 font-medium">Range Radar</div>
               <div className={`text-sm font-bold font-mono ${maxDistance > 200 ? "text-purple-300" : "text-amber-400"}`}>
                 Entro {maxDistance} km {maxDistance > 200 && <span className="text-[10px] text-purple-400 font-sans ml-1">🟣 Viaggio Medio</span>}
               </div>
@@ -436,7 +457,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Tasto "SENZA LIMITI" (>300km) */}
           <button
             onClick={() => {
               if (!userLocation && !locating) handleGetLocation();
@@ -454,7 +474,6 @@ export default function Home() {
           </button>
         </section>
 
-        {/* Avviso se hai locali oltre i 300 km */}
         {over300KmCount > 0 && (
           <div className="bg-amber-950/30 border border-amber-800/40 p-3 rounded-xl text-xs text-amber-300 flex items-center justify-between">
             <span>✈️ Hai <strong>{over300KmCount} locale/i</strong> a più di 300 km di distanza.</span>
@@ -465,7 +484,19 @@ export default function Home() {
               }}
               className="underline font-bold hover:text-white cursor-pointer"
             >
-              Vedi nella sezione Senza Limiti →
+              Vedi in Senza Limiti →
+            </button>
+          </div>
+        )}
+
+        {hiddenDueToSlider > 0 && (
+          <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl text-xs text-slate-400 flex items-center justify-between">
+            <span>💡 Ci sono <strong>{hiddenDueToSlider} locali</strong> tra {maxDistance} km e 300 km.</span>
+            <button
+              onClick={() => setMaxDistance(300)}
+              className="text-amber-400 font-bold hover:underline cursor-pointer"
+            >
+              Imposta barra a 300 km →
             </button>
           </div>
         )}
@@ -513,7 +544,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Lista Locali Radar (entro 300km) */}
+        {/* Lista Locali Radar */}
         {loading ? (
           <div className="text-center py-20 text-slate-500">Caricamento locali...</div>
         ) : filtered.length === 0 ? (
@@ -574,10 +605,11 @@ export default function Home() {
                     <span className="font-medium text-slate-300">{r.category}</span>
                     <span>•</span>
                     <span className="text-amber-300 font-mono font-semibold">{r.price_range}</span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <MapPin className="h-3 w-3 text-slate-500" /> {r.city}
-                    </span>
+                  </div>
+
+                  <div className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5 text-amber-400/80 shrink-0" />
+                    <span>{r.address ? `${r.address}, ${r.city}` : r.city}</span>
                   </div>
 
                   {r.notes && (
@@ -591,11 +623,13 @@ export default function Home() {
                   {r.distKm !== null ? (
                     <span className="text-emerald-400 font-mono font-bold">📍 {r.distKm} km da te</span>
                   ) : (
-                    <span className="text-slate-600">Distanza non calcolata</span>
+                    <span className="text-slate-500 italic">Distanza in attesa</span>
                   )}
 
                   <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + " " + r.city)}`}
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      (r.address ? r.address + " " : "") + r.name + " " + r.city
+                    )}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 text-amber-400 hover:underline"
@@ -608,44 +642,57 @@ export default function Home() {
           </div>
         )}
 
-        {/* Modal Aggiungi Locale */}
+        {/* Modal Aggiungi Locale con Via e Civico */}
         {showModal && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
               <h2 className="text-xl font-bold text-white">Aggiungi nuovo locale</h2>
               <form onSubmit={handleAddRestaurant} className="space-y-3">
                 <div>
-                  <label className="text-xs text-slate-400">Nome Locale</label>
+                  <label className="text-xs text-slate-400">Nome Locale *</label>
                   <input
                     type="text"
                     required
-                    placeholder="es. Da Ciro"
+                    placeholder="es. I Due Cippi"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
                   />
                 </div>
 
+                {/* INDIRIZZO: VIA E CIVICO */}
+                <div>
+                  <label className="text-xs text-amber-400 font-semibold">Indirizzo (Via e Numero Civico) *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="es. Piazza Vittorio Veneto 26"
+                    value={formData.address}
+                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    className="w-full bg-slate-950 border border-amber-400/40 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400 shadow-inner"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-slate-400">Categoria</label>
+                    <label className="text-xs text-slate-400">Città / Comune *</label>
                     <input
                       type="text"
                       required
-                      placeholder="es. Pizzeria, Sushi"
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      placeholder="es. Saturnia"
+                      value={formData.city}
+                      onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-400">Città</label>
+                    <label className="text-xs text-slate-400">Categoria *</label>
                     <input
                       type="text"
                       required
-                      placeholder="es. Roma"
-                      value={formData.city}
-                      onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                      placeholder="es. Ristorante toscano"
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
                     />
                   </div>
@@ -681,7 +728,7 @@ export default function Home() {
                   <label className="text-xs text-slate-400">Note o piatto consigliato</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Ottima carbonara!"
+                    placeholder="es. Bistecca eccezionale e ottima carta vini"
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
