@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { MapPin, Utensils, Navigation, Plus, ExternalLink, Star } from "lucide-react";
+import { MapPin, Utensils, Navigation, Plus, ExternalLink, SlidersHorizontal } from "lucide-react";
 
 export default function Home() {
   const [restaurants, setRestaurants] = useState([]);
@@ -11,6 +11,7 @@ export default function Home() {
   const [selectedStatus, setSelectedStatus] = useState("tutti");
   const [userLocation, setUserLocation] = useState(null);
   const [locating, setLocating] = useState(false);
+  const [maxDistance, setMaxDistance] = useState(50); // Slider: default 50km
   const [showModal, setShowModal] = useState(false);
 
   // Form nuovo locale
@@ -77,12 +78,31 @@ export default function Home() {
     );
   }
 
-  // Inserimento nuovo locale
+  // Salva nuovo locale (recupera coordinate in automatico)
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city) return;
 
-    const { error } = await supabase.from("restaurants").insert([formData]);
+    let latitude = null;
+    let longitude = null;
+
+    try {
+      // Ricerca coordinate gratis con OpenStreetMap
+      const query = encodeURIComponent(`${formData.name}, ${formData.city}`);
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
+      const geo = await res.json();
+      if (geo && geo.length > 0) {
+        latitude = parseFloat(geo[0].lat);
+        longitude = parseFloat(geo[0].lon);
+      }
+    } catch (err) {
+      console.log("Coordinate non trovate, proseguo senza.");
+    }
+
+    const { error } = await supabase.from("restaurants").insert([
+      { ...formData, latitude, longitude }
+    ]);
+
     if (!error) {
       setFormData({
         name: "",
@@ -99,21 +119,29 @@ export default function Home() {
     }
   }
 
-  // Filtri e ordinamento
+  // Categorie dinamiche
   const categories = ["Tutte", ...new Set(restaurants.map((r) => r.category))];
 
+  // Filtro categoria e stato
   let filtered = restaurants.filter((r) => {
     const matchCategory = selectedCategory === "Tutte" || r.category === selectedCategory;
     const matchStatus = selectedStatus === "tutti" || r.status === selectedStatus;
     return matchCategory && matchStatus;
   });
 
+  // Filtro distanza con lo slider
   if (userLocation) {
-    filtered = [...filtered].sort((a, b) => {
-      const distA = getDistance(userLocation.lat, userLocation.lng, a.latitude, a.longitude) || 99999;
-      const distB = getDistance(userLocation.lat, userLocation.lng, b.latitude, b.longitude) || 99999;
-      return distA - distB;
-    });
+    filtered = filtered
+      .filter((r) => {
+        if (!r.latitude || !r.longitude) return true; // Mostra comunque se non ha coordinate
+        const dist = parseFloat(getDistance(userLocation.lat, userLocation.lng, r.latitude, r.longitude));
+        return dist <= maxDistance;
+      })
+      .sort((a, b) => {
+        const distA = parseFloat(getDistance(userLocation.lat, userLocation.lng, a.latitude, a.longitude) || 99999);
+        const distB = parseFloat(getDistance(userLocation.lat, userLocation.lng, b.latitude, b.longitude) || 99999);
+        return distA - distB;
+      });
   }
 
   return (
@@ -124,9 +152,9 @@ export default function Home() {
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
             <h1 className="text-3xl font-extrabold flex items-center gap-2 text-amber-400">
-              <Utensils className="h-8 w-8" /> Food Wishlist
+              <Utensils className="h-8 w-8" /> CIBOZZO
             </h1>
-            <p className="text-sm text-slate-400 mt-1">I tuoi posti preferiti e quelli da provare al volo</p>
+            <p className="text-sm text-slate-400 mt-1">La tua lista dei desideri gastronomica</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -138,20 +166,51 @@ export default function Home() {
               }`}
             >
               <Navigation className="h-4 w-4" />
-              {locating ? "Localizzo..." : userLocation ? "Posizione attiva" : "Vicini a me"}
+              {locating ? "Localizzo..." : userLocation ? "Posizione Attiva" : "Attiva Posizione"}
             </button>
             <button
               onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition"
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition shadow-lg shadow-amber-500/20"
             >
-              <Plus className="h-4 w-4" /> Aggiungi
+              <Plus className="h-4 w-4" /> Aggiungi Locale
             </button>
           </div>
         </header>
 
-        {/* Filtri */}
+        {/* BARRA SCORREVOLE CHILOMETRI (Sotto ai tasti di azione) */}
+        <section className="bg-slate-900/70 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <div className="p-2 bg-amber-400/10 rounded-lg text-amber-400">
+              <SlidersHorizontal className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 font-medium">Raggio di distanza</div>
+              <div className="text-base font-bold text-amber-400 font-mono">
+                {maxDistance >= 100 ? "Nessun limite (+100 km)" : `Entro ${maxDistance} km`}
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full md:w-1/2 flex items-center gap-3">
+            <span className="text-xs text-slate-500 font-mono">1km</span>
+            <input
+              type="range"
+              min="1"
+              max="100"
+              step="1"
+              value={maxDistance}
+              onChange={(e) => {
+                setMaxDistance(Number(e.target.value));
+                if (!userLocation && !locating) handleGetLocation();
+              }}
+              className="w-full accent-amber-400 h-2 bg-slate-800 rounded-lg cursor-pointer"
+            />
+            <span className="text-xs text-slate-500 font-mono">100km</span>
+          </div>
+        </section>
+
+        {/* Filtri Categoria e Stato */}
         <section className="flex flex-col gap-3">
-          {/* Categorie */}
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
             {categories.map((cat) => (
               <button
@@ -168,7 +227,6 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Stato */}
           <div className="flex gap-2">
             {[
               { id: "tutti", label: "Tutti" },
@@ -193,7 +251,7 @@ export default function Home() {
           <div className="text-center py-20 text-slate-500">Caricamento locali...</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-slate-500 border border-dashed border-slate-800 rounded-2xl">
-            Nessun locale trovato con questi filtri.
+            Nessun locale trovato nel raggio di {maxDistance} km o con questi filtri.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -254,7 +312,7 @@ export default function Home() {
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 text-amber-400 hover:underline"
                     >
-                      Apri Mappe <ExternalLink className="h-3 w-3" />
+                      Mappe <ExternalLink className="h-3 w-3" />
                     </a>
                   </div>
                 </div>
@@ -298,7 +356,7 @@ export default function Home() {
                     <input
                       type="text"
                       required
-                      placeholder="es. Roma"
+                      placeholder="es. Napoli"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -336,7 +394,7 @@ export default function Home() {
                   <label className="text-xs text-slate-400">Note o piatto consigliato</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Prova la cacio e pepe!"
+                    placeholder="es. Prendi il calzone ripieno!"
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
