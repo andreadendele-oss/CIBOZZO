@@ -70,28 +70,45 @@ export default function Home() {
     );
   }
 
+  async function handleAddRestaurant(e) {// Salva nuovo locale con controllo errori
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city) return;
 
+    setLoading(true);
+
     let latitude = null;
     let longitude = null;
 
+    // Tentativo coordinate rapido (con timeout di 2 secondi per non bloccare)
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const query = encodeURIComponent(`${formData.name}, ${formData.city}`);
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       const geo = await res.json();
       if (geo && geo.length > 0) {
         latitude = parseFloat(geo[0].lat);
         longitude = parseFloat(geo[0].lon);
       }
-    } catch (err) {}
+    } catch (err) {
+      console.log("Ricerca coordinate saltata o troppo lenta.");
+    }
 
+    // Inserimento su Supabase
     const { error } = await supabase.from("restaurants").insert([
       { ...formData, latitude, longitude }
     ]);
 
-    if (!error) {
+    setLoading(false);
+
+    if (error) {
+      console.error("Errore Supabase:", error);
+      alert("Errore da Supabase: " + error.message);
+    } else {
       setFormData({
         name: "",
         category: "Pizzeria",
@@ -103,7 +120,7 @@ export default function Home() {
       setShowModal(false);
       fetchRestaurants();
     }
-  }
+  }}
 
   // PRE-CALCOLO DISTANZE (rende la barra super fluida)
   const restaurantsWithDist = useMemo(() => {
