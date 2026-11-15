@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { MapPin, Utensils, Navigation, Plus, ExternalLink, SlidersHorizontal, ArrowLeft, Compass, Car } from "lucide-react";
+import { MapPin, Utensils, Navigation, Plus, ExternalLink, SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle } from "lucide-react";
 
 export default function Home() {
   const [restaurants, setRestaurants] = useState([]);
@@ -14,17 +14,17 @@ export default function Home() {
   const [maxDistance, setMaxDistance] = useState(50);
   const [showModal, setShowModal] = useState(false);
   const [isUnlimitedView, setIsUnlimitedView] = useState(false);
+  const [successToast, setSuccessToast] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
-    category: "Pizzeria",
+    category: "Ristorante",
     city: "",
     price_range: "€€",
     status: "da_provare",
     notes: ""
   });
 
-  // Formula Haversine ottimizzata
   function calculateDistance(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return null;
     const R = 6371;
@@ -70,7 +70,6 @@ export default function Home() {
     );
   }
 
-  async function handleAddRestaurant(e) {// Salva nuovo locale con controllo errori
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city) return;
@@ -80,25 +79,16 @@ export default function Home() {
     let latitude = null;
     let longitude = null;
 
-    // Tentativo coordinate rapido (con timeout di 2 secondi per non bloccare)
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const query = encodeURIComponent(`${formData.name}, ${formData.city}`);
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`, {
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
       const geo = await res.json();
       if (geo && geo.length > 0) {
         latitude = parseFloat(geo[0].lat);
         longitude = parseFloat(geo[0].lon);
       }
-    } catch (err) {
-      console.log("Ricerca coordinate saltata o troppo lenta.");
-    }
+    } catch (err) {}
 
-    // Inserimento su Supabase
     const { error } = await supabase.from("restaurants").insert([
       { ...formData, latitude, longitude }
     ]);
@@ -106,23 +96,24 @@ export default function Home() {
     setLoading(false);
 
     if (error) {
-      console.error("Errore Supabase:", error);
-      alert("Errore da Supabase: " + error.message);
+      alert("Errore Supabase: " + error.message);
     } else {
       setFormData({
         name: "",
-        category: "Pizzeria",
+        category: "Ristorante",
         city: "",
         price_range: "€€",
         status: "da_provare",
         notes: ""
       });
       setShowModal(false);
+      setSuccessToast("Locale salvato con successo! 🎉");
+      setTimeout(() => setSuccessToast(""), 3500);
       fetchRestaurants();
     }
-  }}
+  }
 
-  // PRE-CALCOLO DISTANZE (rende la barra super fluida)
+  // Pre-calcolo delle distanze
   const restaurantsWithDist = useMemo(() => {
     return restaurants.map((r) => ({
       ...r,
@@ -132,7 +123,7 @@ export default function Home() {
 
   const categories = useMemo(() => ["Tutte", ...new Set(restaurants.map((r) => r.category))], [restaurants]);
 
-  // FILTRAGGIO ULTRA-RAPIDO
+  // Filtro lista
   const filtered = useMemo(() => {
     return restaurantsWithDist
       .filter((r) => {
@@ -152,13 +143,18 @@ export default function Home() {
       });
   }, [restaurantsWithDist, selectedCategory, selectedStatus, userLocation, maxDistance, isUnlimitedView]);
 
+  // Quanti locali sono nascosti per la distanza nella vista scura
+  const hiddenDueToDistance = useMemo(() => {
+    if (!userLocation || isUnlimitedView) return 0;
+    return restaurantsWithDist.filter((r) => r.distKm !== null && r.distKm > maxDistance).length;
+  }, [restaurantsWithDist, userLocation, maxDistance, isUnlimitedView]);
+
   // ==========================================
   // VISTA 2: BORDEAUX & PANNA SPORCA (SENZA LIMITI)
   // ==========================================
   if (isUnlimitedView) {
     return (
       <div className="min-h-screen bg-[#F4EFEA] text-[#581825] p-4 md:p-8 font-serif selection:bg-[#581825] selection:text-[#F4EFEA]">
-        {/* Animazione CSS per la macchinina */}
         <style>{`
           @keyframes driveCar {
             0% { transform: translateX(-15px); opacity: 0; }
@@ -171,14 +167,12 @@ export default function Home() {
           }
         `}</style>
 
-        <div className="max-w-4xl mx-auto space-y-8">
+        <div className="max-w-4xl mx-auto space-y-6">
           
           <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b-2 border-[#581825]/20 pb-6">
             <div>
-              {/* Bussola + Macchinina che viaggia in loop sulla stradina */}
               <div className="flex items-center gap-2">
                 <Compass className="h-5 w-5 text-[#581825] shrink-0" />
-                
                 <div className="relative w-28 h-5 flex items-center overflow-hidden">
                   <div className="w-full h-[1.5px] bg-[#581825]/30 rounded-full"></div>
                   <div className="absolute animate-car-loop text-[#581825]">
@@ -191,68 +185,94 @@ export default function Home() {
                 CIBOZZO • SENZA LIMITI
               </h1>
               <p className="text-xs text-[#7D3C4D] mt-1 font-sans">
-                Tutti i locali salvati, senza barriere di chilometri.
+                Tutti i {restaurants.length} locali salvati, senza vincoli di chilometri.
               </p>
             </div>
 
             <button
               onClick={() => setIsUnlimitedView(false)}
-              className="flex items-center gap-2 bg-[#581825] text-[#F4EFEA] hover:bg-[#722334] px-4 py-2 rounded-xl text-xs font-sans font-bold transition shadow-sm"
+              className="flex items-center gap-2 bg-[#581825] text-[#F4EFEA] hover:bg-[#722334] px-4 py-2.5 rounded-xl text-xs font-sans font-bold transition shadow-sm cursor-pointer"
             >
               <ArrowLeft className="h-4 w-4" /> Torna al Radar
             </button>
           </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
-            {filtered.map((r) => (
-              <div
-                key={r.id}
-                className="bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/30 p-5 rounded-2xl flex flex-col justify-between gap-4 transition"
-              >
-                <div>
-                  <div className="flex justify-between items-start gap-2">
-                    <h3 className="font-serif font-bold text-lg text-[#581825]">{r.name}</h3>
-                    <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
-                      {r.status === "provato" ? "Provato" : "Da Provare"}
-                    </span>
+          {/* FILTRI CATEGORIE ANCHE NELLA PAGINA BORDEAUX */}
+          <section className="flex flex-col gap-2 font-sans">
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                    selectedCategory === cat
+                      ? "bg-[#581825] text-[#F4EFEA] shadow-md"
+                      : "bg-[#FCFAF8] border border-[#E7DFD5] text-[#7D3C4D] hover:bg-[#E7DFD5]"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Lista Locali */}
+          {filtered.length === 0 ? (
+            <div className="text-center py-16 text-[#8B263E] border-2 border-dashed border-[#E7DFD5] rounded-2xl font-sans">
+              Nessun locale trovato con la categoria "{selectedCategory}".
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
+              {filtered.map((r) => (
+                <div
+                  key={r.id}
+                  className="bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/30 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
+                >
+                  <div>
+                    <div className="flex justify-between items-start gap-2">
+                      <h3 className="font-serif font-bold text-lg text-[#581825]">{r.name}</h3>
+                      <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
+                        {r.status === "provato" ? "Provato" : "Da Provare"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1 font-medium">
+                      <span>{r.category}</span>
+                      <span>•</span>
+                      <span className="font-bold">{r.price_range}</span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3" /> {r.city}
+                      </span>
+                    </div>
+
+                    {r.notes && (
+                      <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif">
+                        "{r.notes}"
+                      </p>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1 font-medium">
-                    <span>{r.category}</span>
-                    <span>•</span>
-                    <span className="font-bold">{r.price_range}</span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <MapPin className="h-3 w-3" /> {r.city}
-                    </span>
+                  <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs">
+                    {r.distKm !== null ? (
+                      <span className="font-mono font-bold text-[#8B263E]">📍 {r.distKm} km da te</span>
+                    ) : (
+                      <span className="text-[#A56B77]">Distanza sconosciuta</span>
+                    )}
+
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + " " + r.city)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
+                    >
+                      Mappe <ExternalLink className="h-3 w-3" />
+                    </a>
                   </div>
-
-                  {r.notes && (
-                    <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif">
-                      "{r.notes}"
-                    </p>
-                  )}
                 </div>
-
-                <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs">
-                  {r.distKm !== null ? (
-                    <span className="font-mono font-bold text-[#8B263E]">📍 {r.distKm} km da te</span>
-                  ) : (
-                    <span className="text-[#A56B77]">Distanza sconosciuta</span>
-                  )}
-
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + " " + r.city)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
-                  >
-                    Mappe <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
         </div>
       </div>
@@ -266,6 +286,13 @@ export default function Home() {
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans">
       <div className="max-w-4xl mx-auto space-y-6">
         
+        {/* Notifica di Salvataggio Successo */}
+        {successToast && (
+          <div className="fixed top-5 right-5 z-50 bg-emerald-500 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-sm shadow-xl flex items-center gap-2 animate-bounce">
+            <CheckCircle className="h-5 w-5" /> {successToast}
+          </div>
+        )}
+
         {/* Header */}
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
@@ -310,7 +337,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Slider fluido fino a 300km (senza lag) */}
           <div className="w-full md:flex-1 flex items-center px-2">
             <input
               type="range"
@@ -325,9 +351,13 @@ export default function Home() {
             />
           </div>
 
-          {/* Tasto quadrato minimale da designer con testo affiancato */}
+          {/* Cliccando Senza Limiti azzera anche la categoria su Tutte */}
           <button
-            onClick={() => setIsUnlimitedView(true)}
+            onClick={() => {
+              setSelectedCategory("Tutte");
+              setSelectedStatus("tutti");
+              setIsUnlimitedView(true);
+            }}
             className="group flex items-center gap-2 bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-amber-400/40 px-3 py-1.5 rounded-xl transition cursor-pointer"
             title="Mostra tutti i locali senza limiti"
           >
@@ -338,6 +368,22 @@ export default function Home() {
           </button>
         </section>
 
+        {/* Avviso se ci sono locali oltre il raggio impostato */}
+        {hiddenDueToDistance > 0 && (
+          <div className="bg-amber-950/30 border border-amber-800/40 p-3 rounded-xl text-xs text-amber-300 flex items-center justify-between">
+            <span>💡 C'è <strong>{hiddenDueToDistance} locale</strong> oltre i {maxDistance} km di distanza.</span>
+            <button
+              onClick={() => {
+                setSelectedCategory("Tutte");
+                setIsUnlimitedView(true);
+              }}
+              className="underline font-bold hover:text-white"
+            >
+              Vedi in Senza Limiti →
+            </button>
+          </div>
+        )}
+
         {/* Filtri Categoria e Stato */}
         <section className="flex flex-col gap-3">
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
@@ -345,7 +391,7 @@ export default function Home() {
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
                   selectedCategory === cat
                     ? "bg-amber-400 text-slate-950 shadow-md"
                     : "bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
@@ -365,7 +411,7 @@ export default function Home() {
               <button
                 key={st.id}
                 onClick={() => setSelectedStatus(st.id)}
-                className={`text-xs px-3 py-1 rounded-md transition ${
+                className={`text-xs px-3 py-1 rounded-md transition cursor-pointer ${
                   selectedStatus === st.id ? "bg-slate-800 text-white font-bold" : "text-slate-500 hover:text-slate-300"
                 }`}
               >
@@ -380,7 +426,7 @@ export default function Home() {
           <div className="text-center py-20 text-slate-500">Caricamento locali...</div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-slate-500 border border-dashed border-slate-800 rounded-2xl">
-            Nessun locale trovato nel raggio di {maxDistance} km o con questi filtri.
+            Nessun locale trovato nel raggio di {maxDistance} km per "{selectedCategory}".
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -452,7 +498,7 @@ export default function Home() {
                   <input
                     type="text"
                     required
-                    placeholder="es. Da Ciro"
+                    placeholder="es. I Due Cippi"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -465,7 +511,7 @@ export default function Home() {
                     <input
                       type="text"
                       required
-                      placeholder="es. Pizzeria, Sushi"
+                      placeholder="es. Ristorante toscano"
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -476,7 +522,7 @@ export default function Home() {
                     <input
                       type="text"
                       required
-                      placeholder="es. Napoli"
+                      placeholder="es. Saturnia"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -514,7 +560,7 @@ export default function Home() {
                   <label className="text-xs text-slate-400">Note o piatto consigliato</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Prendi il calzone ripieno!"
+                    placeholder="es. Bistecca alla fiorentina super!"
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -525,13 +571,13 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setShowModal(false)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm"
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm cursor-pointer"
                   >
                     Annulla
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-sm"
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-sm cursor-pointer"
                   >
                     Salva Locale
                   </button>
