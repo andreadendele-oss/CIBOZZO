@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { MapPin, Utensils, Navigation, Plus, ExternalLink, SlidersHorizontal } from "lucide-react";
+import { MapPin, Utensils, Navigation, Plus, ExternalLink, SlidersHorizontal, ArrowLeft, Compass } from "lucide-react";
 
 export default function Home() {
   const [restaurants, setRestaurants] = useState([]);
@@ -11,8 +11,9 @@ export default function Home() {
   const [selectedStatus, setSelectedStatus] = useState("tutti");
   const [userLocation, setUserLocation] = useState(null);
   const [locating, setLocating] = useState(false);
-  const [maxDistance, setMaxDistance] = useState(50); // Slider: default 50km
+  const [maxDistance, setMaxDistance] = useState(50); // Slider: default 50km, max 300km
   const [showModal, setShowModal] = useState(false);
+  const [isUnlimitedView, setIsUnlimitedView] = useState(false); // Toggle per la pagina Bordeaux & Panna
 
   // Form nuovo locale
   const [formData, setFormData] = useState({
@@ -59,7 +60,7 @@ export default function Home() {
   // Geolocalizzazione utente
   function handleGetLocation() {
     if (!navigator.geolocation) {
-      alert("Geolocalizzazione non supportata dal tuo browser");
+      alert("Geolocalizzazione non supportata");
       return;
     }
     setLocating(true);
@@ -71,14 +72,14 @@ export default function Home() {
         });
         setLocating(false);
       },
-      (err) => {
+      () => {
         alert("Permesso posizione negato o non disponibile");
         setLocating(false);
       }
     );
   }
 
-  // Salva nuovo locale (recupera coordinate in automatico)
+  // Salva nuovo locale
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city) return;
@@ -87,7 +88,6 @@ export default function Home() {
     let longitude = null;
 
     try {
-      // Ricerca coordinate gratis con OpenStreetMap
       const query = encodeURIComponent(`${formData.name}, ${formData.city}`);
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}`);
       const geo = await res.json();
@@ -96,7 +96,7 @@ export default function Home() {
         longitude = parseFloat(geo[0].lon);
       }
     } catch (err) {
-      console.log("Coordinate non trovate, proseguo senza.");
+      console.log("Coordinate non trovate.");
     }
 
     const { error } = await supabase.from("restaurants").insert([
@@ -119,21 +119,20 @@ export default function Home() {
     }
   }
 
-  // Categorie dinamiche
   const categories = ["Tutte", ...new Set(restaurants.map((r) => r.category))];
 
-  // Filtro categoria e stato
+  // Filtri standard
   let filtered = restaurants.filter((r) => {
     const matchCategory = selectedCategory === "Tutte" || r.category === selectedCategory;
     const matchStatus = selectedStatus === "tutti" || r.status === selectedStatus;
     return matchCategory && matchStatus;
   });
 
-  // Filtro distanza con lo slider
-  if (userLocation) {
+  // Filtro distanza (solo se siamo nella vista normale con limiti)
+  if (userLocation && !isUnlimitedView) {
     filtered = filtered
       .filter((r) => {
-        if (!r.latitude || !r.longitude) return true; // Mostra comunque se non ha coordinate
+        if (!r.latitude || !r.longitude) return true;
         const dist = parseFloat(getDistance(userLocation.lat, userLocation.lng, r.latitude, r.longitude));
         return dist <= maxDistance;
       })
@@ -144,6 +143,103 @@ export default function Home() {
       });
   }
 
+  // ==========================================
+  // VISTA 2: PAGINA "PANNA SPORCA & BORDEAUX" (SENZA LIMITI)
+  // ==========================================
+  if (isUnlimitedView) {
+    return (
+      <div className="min-h-screen bg-[#F4EFEA] text-[#581825] p-4 md:p-8 font-serif selection:bg-[#581825] selection:text-[#F4EFEA]">
+        <div className="max-w-4xl mx-auto space-y-8">
+          
+          {/* Header Vintage Bordeaux */}
+          <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b-2 border-[#581825]/20 pb-6">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold tracking-widest uppercase text-[#8B263E]">
+                <Compass className="h-4 w-4" /> Modalità Ovunque nel Mondo
+              </div>
+              <h1 className="text-4xl font-extrabold tracking-tight mt-1 text-[#581825]">
+                CIBOZZO • SENZA LIMITI
+              </h1>
+              <p className="text-sm text-[#7D3C4D] mt-1 font-sans">
+                Tutti i locali salvati, senza barriere chilometriche.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setIsUnlimitedView(false)}
+              className="flex items-center gap-2 bg-[#581825] text-[#F4EFEA] hover:bg-[#722334] px-5 py-2.5 rounded-xl text-sm font-sans font-semibold transition shadow-md"
+            >
+              <ArrowLeft className="h-4 w-4" /> Torna al Radar
+            </button>
+          </header>
+
+          {/* Griglia Locali Bordeaux & Panna */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 font-sans">
+            {filtered.map((r) => {
+              const distance =
+                userLocation && r.latitude && r.longitude
+                  ? getDistance(userLocation.lat, userLocation.lng, r.latitude, r.longitude)
+                  : null;
+
+              return (
+                <div
+                  key={r.id}
+                  className="bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/40 p-6 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
+                >
+                  <div>
+                    <div className="flex justify-between items-start gap-2">
+                      <h3 className="font-serif font-bold text-xl text-[#581825]">{r.name}</h3>
+                      <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-1 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
+                        {r.status === "provato" ? "Provato" : "Da Provare"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1 font-medium">
+                      <span>{r.category}</span>
+                      <span>•</span>
+                      <span className="font-bold">{r.price_range}</span>
+                      <span>•</span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3 w-3" /> {r.city}
+                      </span>
+                    </div>
+
+                    {r.notes && (
+                      <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif">
+                        "{r.notes}"
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs">
+                    {distance ? (
+                      <span className="font-mono font-bold text-[#8B263E]">📍 {distance} km da te</span>
+                    ) : (
+                      <span className="text-[#A56B77]">Distanza sconosciuta</span>
+                    )}
+
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + " " + r.city)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
+                    >
+                      Apri Mappe <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // VISTA 1: VERSIONE SCURA DI DEFAULT
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -177,36 +273,53 @@ export default function Home() {
           </div>
         </header>
 
-        {/* BARRA SCORREVOLE CHILOMETRI (Sotto ai tasti di azione) */}
+        {/* BARRA SCORREVOLE + TASTO OTTAGONALE SENZA LIMITI */}
         <section className="bg-slate-900/70 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+          
+          {/* Label "Range" con numero che diventa viola oltre i 200km */}
           <div className="flex items-center gap-3 w-full md:w-auto">
-            <div className="p-2 bg-amber-400/10 rounded-lg text-amber-400">
+            <div className={`p-2 rounded-lg transition-colors ${maxDistance > 200 ? "bg-purple-900/30 text-purple-300" : "bg-amber-400/10 text-amber-400"}`}>
               <SlidersHorizontal className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-xs text-slate-400 font-medium">Raggio di distanza</div>
-              <div className="text-base font-bold text-amber-400 font-mono">
-                {maxDistance >= 100 ? "Nessun limite (+100 km)" : `Entro ${maxDistance} km`}
+              <div className="text-xs text-slate-400 font-medium">Range</div>
+              <div className={`text-base font-bold font-mono transition-colors ${maxDistance > 200 ? "text-purple-400" : "text-amber-400"}`}>
+                Entro {maxDistance} km {maxDistance > 200 && <span className="text-[11px] font-sans text-purple-300 font-normal ml-1">🟣 Viaggio Lungo</span>}
               </div>
             </div>
           </div>
 
-          <div className="w-full md:w-1/2 flex items-center gap-3">
-            <span className="text-xs text-slate-500 font-mono">1km</span>
+          {/* Barra senza scritte ai lati che diventa viola scuro oltre i 200km */}
+          <div className="w-full md:flex-1 flex items-center px-2">
             <input
               type="range"
               min="1"
-              max="100"
+              max="300"
               step="1"
               value={maxDistance}
               onChange={(e) => {
                 setMaxDistance(Number(e.target.value));
                 if (!userLocation && !locating) handleGetLocation();
               }}
-              className="w-full accent-amber-400 h-2 bg-slate-800 rounded-lg cursor-pointer"
+              className={`w-full h-2.5 rounded-lg cursor-pointer transition-all ${
+                maxDistance > 200
+                  ? "accent-purple-700 bg-purple-950/60"
+                  : "accent-amber-400 bg-slate-800"
+              }`}
             />
-            <span className="text-xs text-slate-500 font-mono">100km</span>
           </div>
+
+          {/* Tasto Ottagonale "SENZA LIMITI" con evidenziazione gialla amber-400 */}
+          <button
+            onClick={() => setIsUnlimitedView(true)}
+            title="Apri vista senza limiti di distanza"
+            className="w-full md:w-auto px-4 py-2 text-xs font-black tracking-wider uppercase transition-all duration-200 
+                       bg-slate-800/90 text-slate-300 border border-slate-700 
+                       hover:bg-amber-400 hover:text-slate-950 hover:border-amber-300 hover:shadow-[0_0_15px_rgba(251,191,36,0.4)]
+                       [clip-path:polygon(30%_0%,70%_0%,100%_30%,100%_70%,70%_100%,30%_100%,0%_70%,0%_30%)]"
+          >
+            Senza Limiti
+          </button>
         </section>
 
         {/* Filtri Categoria e Stato */}
@@ -305,9 +418,7 @@ export default function Home() {
                     )}
 
                     <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        r.name + " " + r.city
-                      )}`}
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + " " + r.city)}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 text-amber-400 hover:underline"
