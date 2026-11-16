@@ -6,8 +6,10 @@ import {
   MapPin, Utensils, Navigation, Plus, ExternalLink, 
   SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle, 
   MoreVertical, Trash2, Globe, Star, MessageSquarePlus, 
-  MessageSquareQuote, Dices, Send, Sparkles, UserCheck
+  MessageSquareQuote, Dices, Send, Sparkles, User, LogOut, Check
 } from "lucide-react";
+
+const AVATAR_LIST = ["🍕", "🍔", "🍣", "🌮", "🍝", "🥩", "🍺", "🍷", "👑", "👨‍🍳", "🦁", "🚀", "🏎️", "🎯", "💀", "🤠"];
 
 export default function Home() {
   const [restaurants, setRestaurants] = useState([]);
@@ -21,6 +23,12 @@ export default function Home() {
   const [isUnlimitedView, setIsUnlimitedView] = useState(false);
   const [successToast, setSuccessToast] = useState("");
   const [activeMenuId, setActiveMenuId] = useState(null);
+
+  // Profilo Utente
+  const [currentUser, setCurrentUser] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileUsername, setProfileUsername] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState("🍕");
 
   // Roulette
   const [rouletteWinner, setRouletteWinner] = useState(null);
@@ -41,8 +49,25 @@ export default function Home() {
     status: "da_provare",
     notes: "",
     recommended_by: "",
+    user_avatar: "🍕",
     occasion: "🍔 Sfondamento tra amici"
   });
+
+  // Carica utente da LocalStorage all'avvio
+  useEffect(() => {
+    const savedUser = localStorage.getItem("cibozzo_user");
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        setCurrentUser(parsed);
+        setFormData((prev) => ({
+          ...prev,
+          recommended_by: parsed.username,
+          user_avatar: parsed.avatar
+        }));
+      } catch (e) {}
+    }
+  }, []);
 
   function calculateDistance(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return null;
@@ -91,6 +116,41 @@ export default function Home() {
       },
       { timeout: 10000 }
     );
+  }
+
+  // Gestione Profilo Utente
+  async function handleSaveProfile(e) {
+    e.preventDefault();
+    if (!profileUsername.trim()) return;
+
+    const trimmed = profileUsername.trim();
+    const userObj = { username: trimmed, avatar: profileAvatar };
+
+    // Salva o aggiorna profilo su Supabase
+    await supabase.from("profiles").upsert(
+      { username: trimmed, avatar: profileAvatar },
+      { onConflict: "username" }
+    );
+
+    localStorage.setItem("cibozzo_user", JSON.stringify(userObj));
+    setCurrentUser(userObj);
+    setFormData((prev) => ({
+      ...prev,
+      recommended_by: userObj.username,
+      user_avatar: userObj.avatar
+    }));
+
+    setShowProfileModal(false);
+    setSuccessToast(`Benvenuto, ${userObj.avatar} ${userObj.username}! 🎉`);
+    setTimeout(() => setSuccessToast(""), 3500);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("cibozzo_user");
+    setCurrentUser(null);
+    setProfileUsername("");
+    setSuccessToast("Profilo disconnesso!");
+    setTimeout(() => setSuccessToast(""), 3000);
   }
 
   async function handleDeleteRestaurant(id, name) {
@@ -168,9 +228,15 @@ export default function Home() {
       }
     } catch (err) {}
 
-    const { error } = await supabase.from("restaurants").insert([
-      { ...formData, latitude, longitude }
-    ]);
+    const payload = {
+      ...formData,
+      latitude,
+      longitude,
+      recommended_by: currentUser ? currentUser.username : (formData.recommended_by || "Un amico"),
+      user_avatar: currentUser ? currentUser.avatar : "🍕"
+    };
+
+    const { error } = await supabase.from("restaurants").insert([payload]);
 
     setLoading(false);
 
@@ -185,7 +251,8 @@ export default function Home() {
         price_range: "€€",
         status: "da_provare",
         notes: "",
-        recommended_by: "",
+        recommended_by: currentUser ? currentUser.username : "",
+        user_avatar: currentUser ? currentUser.avatar : "🍕",
         occasion: "🍔 Sfondamento tra amici"
       });
       setShowModal(false);
@@ -193,41 +260,6 @@ export default function Home() {
       setTimeout(() => setSuccessToast(""), 3500);
       fetchRestaurants();
     }
-  }
-
-  // Gira la Roulette
-  function spinRoulette() {
-    if (filtered.length === 0) {
-      alert("Nessun locale disponibile con i filtri attuali!");
-      return;
-    }
-    setIsSpinning(true);
-    setTimeout(() => {
-      const random = filtered[Math.floor(Math.random() * filtered.length)];
-      setRouletteWinner(random);
-      setIsSpinning(false);
-    }, 800);
-  }
-
-  // Prepara link messaggio WhatsApp
-  function getWhatsAppUrl(r) {
-    const distText = r.distKm ? `📍 A ${r.distKm} km da noi\n` : "";
-    const starsText = r.rating ? `⭐ Voto: ${r.rating}/5\n` : "";
-    const recText = r.recommended_by ? `👤 Consigliato da: ${r.recommended_by}\n` : "";
-    const occasionText = r.occasion ? `🏷️ Serata: ${r.occasion}\n` : "";
-    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-      (r.address ? r.address + " " : "") + r.name + " " + r.city
-    )}`;
-
-    const text = 
-`🍕 *Ragazzi, stasera vi andrebbe questo?*
-
-🍴 *${r.name}* (${r.category} - ${r.price_range})
-🏙️ ${r.city}${r.address ? `, ${r.address}` : ""}
-${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.notes}"\n` : ""}
-🗺️ *Mappe:* ${mapsUrl}`;
-
-    return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
   }
 
   const restaurantsWithDist = useMemo(() => {
@@ -269,6 +301,58 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
         return distA - distB;
       });
   }, [restaurantsWithDist, selectedCategory, selectedStatus, userLocation, maxDistance, isUnlimitedView]);
+
+  // ROULETTE RIGOROSA: SEGUE FERMAMENTE IL RANGE KM DELLO SLIDER
+  function spinRoulette() {
+    if (!userLocation) {
+      alert("📍 Attiva prima la posizione GPS, altrimenti non posso calcolare quali locali sono nel tuo raggio di km!");
+      handleGetLocation();
+      return;
+    }
+
+    // Filtra candidati RIGOROSAMENTE entro il range di km
+    const pool = restaurantsWithDist.filter((r) => {
+      const matchCategory =
+        selectedCategory === "Tutte" ||
+        r.category.trim().toLowerCase() === selectedCategory.trim().toLowerCase();
+      const matchStatus = selectedStatus === "tutti" || r.status === selectedStatus;
+      const matchDist = r.distKm !== null && r.distKm <= maxDistance;
+
+      return matchCategory && matchStatus && matchDist;
+    });
+
+    if (pool.length === 0) {
+      alert(`Nessun locale trovato nel raggio di ${maxDistance} km con questi filtri! Prova ad aumentare la barra del range.`);
+      return;
+    }
+
+    setIsSpinning(true);
+    setTimeout(() => {
+      const random = pool[Math.floor(Math.random() * pool.length)];
+      setRouletteWinner(random);
+      setIsSpinning(false);
+    }, 700);
+  }
+
+  function getWhatsAppUrl(r) {
+    const distText = r.distKm ? `📍 A ${r.distKm} km da noi\n` : "";
+    const starsText = r.rating ? `⭐ Voto: ${r.rating}/5\n` : "";
+    const recText = r.recommended_by ? `👤 Consigliato da: ${r.user_avatar || "🍕"} ${r.recommended_by}\n` : "";
+    const occasionText = r.occasion ? `🏷️ Serata: ${r.occasion}\n` : "";
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      (r.address ? r.address + " " : "") + r.name + " " + r.city
+    )}`;
+
+    const text = 
+`🍕 *Ragazzi, stasera vi andrebbe questo?*
+
+🍴 *${r.name}* (${r.category} - ${r.price_range})
+🏙️ ${r.city}${r.address ? `, ${r.address}` : ""}
+${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.notes}"\n` : ""}
+🗺️ *Mappe:* ${mapsUrl}`;
+
+    return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  }
 
   const over300KmCount = useMemo(() => {
     if (!userLocation) return 0;
@@ -410,7 +494,6 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                       </div>
                     </div>
 
-                    {/* Prezzo + NUVOLETTA + Stellozze */}
                     <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1.5 font-medium flex-wrap">
                       <span>{r.category}</span>
                       <span>•</span>
@@ -436,20 +519,19 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                       )}
                     </div>
 
-                    {/* CHI L'HA CONSIGLIATO CON IL ROAST "PROSSIMA VOLTA EVITA" */}
                     {r.recommended_by && (
                       <div className="mt-2.5">
                         {r.rating && r.rating <= 2 ? (
                           <span className="text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                            💀 Consigliato da {r.recommended_by} - Prossima volta evita!
+                            💀 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Prossima volta evita!
                           </span>
                         ) : r.rating && r.rating >= 4 ? (
                           <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                            👑 Consigliato da {r.recommended_by} - Colpo da maestro!
+                            👑 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Colpo da maestro!
                           </span>
                         ) : (
                           <span className="text-[10px] text-[#7D3C4D] bg-[#E7DFD5]/60 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                            🕵️ Scovato da {r.recommended_by}
+                            🕵️ Scovato da {r.user_avatar || "🍕"} {r.recommended_by}
                           </span>
                         )}
                       </div>
@@ -489,7 +571,6 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition"
-                        title="Proponi questo locale sul gruppo WhatsApp"
                       >
                         <Send className="h-3 w-3" /> WhatsApp
                       </a>
@@ -532,24 +613,50 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
           </div>
         )}
 
-        {/* Header con Tasto ROULETTE */}
+        {/* Header con Profilo Utente + Roulette */}
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
-            <h1 className="text-3xl font-extrabold flex items-center gap-2 text-amber-400">
-              <Utensils className="h-8 w-8" /> CIBOZZO
-            </h1>
-            <p className="text-sm text-slate-400 mt-1">Radar gastronomico intelligente</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-extrabold flex items-center gap-2 text-amber-400">
+                <Utensils className="h-8 w-8" /> CIBOZZO
+              </h1>
+
+              {/* PULSANTE PROFILO / AVATAR */}
+              {currentUser ? (
+                <div 
+                  onClick={() => {
+                    setProfileUsername(currentUser.username);
+                    setProfileAvatar(currentUser.avatar);
+                    setShowProfileModal(true);
+                  }}
+                  className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 hover:border-amber-400 px-2.5 py-1 rounded-full cursor-pointer transition"
+                  title="Modifica il tuo avatar"
+                >
+                  <span className="text-base">{currentUser.avatar}</span>
+                  <span className="text-xs font-bold text-slate-200">{currentUser.username}</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowProfileModal(true)}
+                  className="flex items-center gap-1.5 bg-amber-400/10 hover:bg-amber-400 hover:text-slate-950 text-amber-400 border border-amber-400/30 px-2.5 py-1 rounded-full text-xs font-bold transition cursor-pointer"
+                >
+                  <User className="h-3.5 w-3.5" /> Entra / Crea Profilo
+                </button>
+              )}
+            </div>
+            <p className="text-sm text-slate-400 mt-1">Radar gastronomico per la compagnia</p>
           </div>
+
           <div className="flex flex-wrap gap-2">
-            {/* TASTO ROULETTE */}
+            {/* TASTO ROULETTE RIGOROSA */}
             <button
               onClick={spinRoulette}
               disabled={isSpinning}
               className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition shadow-lg shadow-purple-600/30 cursor-pointer"
-              title="Estrai un locale a caso tra quelli filtrati"
+              title={`Estrai tra i locali entro ${maxDistance} km`}
             >
               <Dices className={`h-4 w-4 ${isSpinning ? "animate-spin" : ""}`} />
-              {isSpinning ? "Scelta in corso..." : "Roulette Stasera"}
+              {isSpinning ? "Giro la ruota..." : `Roulette (Entro ${maxDistance}km)`}
             </button>
 
             <button
@@ -771,20 +878,20 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                     )}
                   </div>
 
-                  {/* CHI L'HA CONSIGLIATO CON IL ROAST "PROSSIMA VOLTA EVITA" */}
+                  {/* CHI L'HA CONSIGLIATO CON AVATAR E ROAST */}
                   {r.recommended_by && (
                     <div className="mt-2.5">
                       {r.rating && r.rating <= 2 ? (
                         <span className="text-[10px] font-bold bg-rose-950/80 text-rose-300 border border-rose-800/80 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                          💀 Consigliato da {r.recommended_by} - Prossima volta evita!
+                          💀 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Prossima volta evita!
                         </span>
                       ) : r.rating && r.rating >= 4 ? (
                         <span className="text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                          👑 Consigliato da {r.recommended_by} - Colpo da maestro!
+                          👑 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Colpo da maestro!
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                          🕵️ Scovato da {r.recommended_by}
+                        <span className="text-[10px] text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          {r.user_avatar || "🍕"} Scovato da {r.recommended_by}
                         </span>
                       )}
                     </div>
@@ -817,13 +924,11 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   )}
 
                   <div className="flex items-center gap-2">
-                    {/* TASTO CONDIVIDI WHATSAPP */}
                     <a
                       href={getWhatsAppUrl(r)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 bg-emerald-600/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/30 font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer"
-                      title="Proponi questo locale sul gruppo WhatsApp"
                     >
                       <Send className="h-3 w-3" /> WhatsApp
                     </a>
@@ -845,7 +950,83 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
           </div>
         )}
 
-        {/* POPUP ROULETTE DEL SABATO SERA 🎲 */}
+        {/* MODAL PROFILO UTENTE / AVATAR PERSONALIZZABILE 🍕👑 */}
+        {showProfileModal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm space-y-4 shadow-2xl relative">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Cibozzo Identity</span>
+                <h2 className="text-xl font-black text-white mt-0.5">Il tuo Profilo Amico</h2>
+                <p className="text-xs text-slate-400">Scegli il tuo nome e l'avatar che ti rappresenterà!</p>
+              </div>
+
+              <form onSubmit={handleSaveProfile} className="space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Il tuo Nome / Soprannome</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="es. Andrea, Bomber, Il Doc..."
+                    value={profileUsername}
+                    onChange={(e) => setProfileUsername(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-2">Scegli il tuo Avatar</label>
+                  <div className="grid grid-cols-4 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                    {AVATAR_LIST.map((av) => (
+                      <button
+                        type="button"
+                        key={av}
+                        onClick={() => setProfileAvatar(av)}
+                        className={`text-2xl p-2 rounded-xl transition hover:scale-125 flex items-center justify-center cursor-pointer ${
+                          profileAvatar === av ? "bg-amber-400/20 border-2 border-amber-400" : "hover:bg-slate-800"
+                        }`}
+                      >
+                        {av}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  {currentUser ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleLogout();
+                        setShowProfileModal(false);
+                      }}
+                      className="text-xs text-rose-400 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <LogOut className="h-3 w-3" /> Esci
+                    </button>
+                  ) : <div />}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowProfileModal(false)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-amber-500/20 cursor-pointer"
+                    >
+                      Salva Profilo
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP ROULETTE DEL SABATO SERA (RIGOROSA SUI KM) 🎲 */}
         {rouletteWinner && (
           <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
             <div className="bg-slate-900 border-2 border-purple-500 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl relative text-center">
@@ -854,16 +1035,20 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
               </div>
 
               <div>
-                <span className="text-[11px] uppercase font-black text-purple-400 tracking-wider">La Roulette ha deciso:</span>
+                <span className="text-[11px] uppercase font-black text-purple-400 tracking-wider">
+                  Entro {maxDistance} km la Roulette ha scelto:
+                </span>
                 <h2 className="text-2xl font-black text-white mt-1">{rouletteWinner.name}</h2>
                 <p className="text-xs text-slate-300 mt-1">
                   {rouletteWinner.category} • {rouletteWinner.price_range} • {rouletteWinner.city}
                 </p>
                 {rouletteWinner.distKm && (
-                  <p className="text-xs text-emerald-400 font-mono mt-1 font-bold">📍 A {rouletteWinner.distKm} km da voi</p>
+                  <p className="text-sm text-emerald-400 font-mono mt-2 font-bold">📍 A soli {rouletteWinner.distKm} km da voi!</p>
                 )}
                 {rouletteWinner.recommended_by && (
-                  <p className="text-xs text-slate-400 mt-1">Consigliato in origine da <strong>{rouletteWinner.recommended_by}</strong></p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Consigliato da {rouletteWinner.user_avatar || "🍕"} <strong>{rouletteWinner.recommended_by}</strong>
+                  </p>
                 )}
               </div>
 
@@ -874,7 +1059,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-500/20"
                 >
-                  <Send className="h-4 w-4" /> Spedisci la decisione su WhatsApp!
+                  <Send className="h-4 w-4" /> Condividi la sentenza su WhatsApp!
                 </a>
                 <button
                   onClick={() => setRouletteWinner(null)}
@@ -936,7 +1121,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   <textarea
                     rows={4}
                     required
-                    placeholder="es. Bistecca tenerissima, vino top... oppure: posto da dimenticare!"
+                    placeholder="es. Bistecca incredibile! Oppure: servizio lentissimo e conto salato..."
                     value={reviewNotes}
                     onChange={(e) => setReviewNotes(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-400 shadow-inner"
@@ -963,7 +1148,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
           </div>
         )}
 
-        {/* Modal Aggiungi Locale con Chi l'ha consigliato e Occasione */}
+        {/* Modal Aggiungi Locale */}
         {showModal && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1018,19 +1203,27 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   </div>
                 </div>
 
-                {/* CHI HA CONSIGLIATO IL LOCALE */}
+                {/* CONSIGLIATO DA (AUTOCOMPILATO SE LOGGATO) */}
                 <div>
-                  <label className="text-xs text-slate-300 font-semibold">Chi l'ha consigliato? (Nome amico)</label>
-                  <input
-                    type="text"
-                    placeholder="es. Andrea, Luca, Marco..."
-                    value={formData.recommended_by}
-                    onChange={(e) => setFormData({ ...formData, recommended_by: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
-                  />
+                  <label className="text-xs text-slate-300 font-semibold flex items-center justify-between">
+                    <span>Chi l'ha consigliato?</span>
+                    {currentUser && <span className="text-[10px] text-amber-400">Autocompilato col tuo profilo!</span>}
+                  </label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xl p-1 bg-slate-950 border border-slate-800 rounded-lg">
+                      {currentUser ? currentUser.avatar : formData.user_avatar}
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="es. Andrea, Luca..."
+                      value={currentUser ? currentUser.username : formData.recommended_by}
+                      disabled={!!currentUser}
+                      onChange={(e) => setFormData({ ...formData, recommended_by: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-amber-400 disabled:opacity-70"
+                    />
+                  </div>
                 </div>
 
-                {/* OCCASIONE DELLA SERATA */}
                 <div>
                   <label className="text-xs text-slate-300 font-semibold">Che tipo di serata è?</label>
                   <select
@@ -1076,7 +1269,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   <label className="text-xs text-slate-400">Note iniziali</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Piatto consigliato, visto su IG..."
+                    placeholder="es. Piatto consigliato..."
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
