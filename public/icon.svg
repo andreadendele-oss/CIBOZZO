@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Sfumatura Oro Reale -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF2A3"/>
+      <stop offset="35%" stop-color="#F59E0B"/>
+      <stop offset="70%" stop-color="#D97706"/>
+      <stop offset="100%" stop-color="#92400E"/>
+    </linearGradient>
+
+    <!-- Sfumatura Fondo Blu Notte Profondo -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#0f1f3d"/>
+      <stop offset="60%" stop-color="#081024"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </radialGradient>
+
+    <!-- Ombra per dare rilievo 3D alle posate -->
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Sfondo App (Blu Scuro Premium con bordi arrotondati) -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  
+  <!-- Bordo sottile di finitura esterno -->
+  <rect width="496" height="496" x="8" y="8" rx="120" fill="none" stroke="url(#goldGrad)" stroke-width="2" stroke-opacity="0.3"/>
+
+  <!-- SCUDO / STEMMA CENTRALE ORO -->
+  <g filter="url(#goldGlow)">
+    <!-- Scudo esterno pieno -->
+    <path d="M 256 65 C 380 65 415 105 415 220 C 415 350 256 445 256 445 C 256 445 97 350 97 220 C 97 105 132 65 256 65 Z" 
+          fill="#0a152e" stroke="url(#goldGrad)" stroke-width="12"/>
+
+    <!-- Filo dorato interno dello stemma -->
+    <path d="M 256 85 C 362 85 393 120 393 218 C 393 330 256 420 256 420 C 256 420 119 330 119 218 C 119 120 150 85 256 85 Z" 
+          fill="none" stroke="url(#goldGrad)" stroke-width="3" stroke-dasharray="8 6" stroke-opacity="0.8"/>
+  </g>
+
+  <!-- Stella d'eccellenza in cima allo stemma -->
+  <polygon points="256,102 263,122 284,122 267,135 273,155 256,142 239,155 245,135 228,122 249,122" 
+           fill="url(#goldGrad)"/>
+
+  <!-- FORCHETTA E COLTELLO INCROCIATI (STEMMA ORO) -->
+  <g filter="url(#goldGlow)" fill="url(#goldGrad)">
+    
+    <!-- FORCHETTA (inclinata a sinistra) -->
+    <g transform="translate(256, 260) rotate(-32) translate(-256, -260)">
+      <!-- Manico -->
+      <path d="M 250 220 L 248 375 C 248 385 264 385 264 375 L 262 220 Z"/>
+      <!-- Collo forchetta -->
+      <path d="M 245 195 C 245 230 267 230 267 195 L 269 165 C 269 165 243 165 243 165 Z"/>
+      <!-- Rebbio sinistro -->
+      <rect x="241" y="140" width="4.5" height="45" rx="2"/>
+      <!-- Rebbio centro-sinistro -->
+      <rect x="249" y="137" width="4" height="48" rx="2"/>
+      <!-- Rebbio centro-destro -->
+      <rect x="257" y="137" width="4" height="48" rx="2"/>
+      <!-- Rebbio destro -->
+      <rect x="265" y="140" width="4.5" height="45" rx="2"/>
+    </g>
+
+    <!-- COLTELLO (inclinato a destra) -->
+    <g transform="translate(256, 260) rotate(32) translate(-256, -260)">
+      <!-- Manico -->
+      <path d="M 250 220 L 248 375 C 248 385 264 385 264 375 L 262 220 Z"/>
+      <!-- Nodo/Fascetta divisoria -->
+      <rect x="248" y="215" width="16" height="5" rx="2"/>
+      <!-- Lama con dorso dritto e filo curvo -->
+      <path d="M 255 135 C 255 135 267 155 267 215 L 255 215 Z"/>
+    </g>
+
+  </g>
+</svg>
