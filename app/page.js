@@ -5,7 +5,8 @@ import { supabase } from "@/lib/supabase";
 import { 
   MapPin, Utensils, Navigation, Plus, ExternalLink, 
   SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle, 
-  MoreVertical, Trash2, Globe, Star, MessageSquarePlus, MessageSquareQuote
+  MoreVertical, Trash2, Globe, Star, MessageSquarePlus, 
+  MessageSquareQuote, Dices, Send, Sparkles, UserCheck
 } from "lucide-react";
 
 export default function Home() {
@@ -21,6 +22,10 @@ export default function Home() {
   const [successToast, setSuccessToast] = useState("");
   const [activeMenuId, setActiveMenuId] = useState(null);
 
+  // Roulette
+  const [rouletteWinner, setRouletteWinner] = useState(null);
+  const [isSpinning, setIsSpinning] = useState(false);
+
   // Popup Nuvoletta Recensione
   const [reviewModalData, setReviewModalData] = useState(null);
   const [reviewRating, setReviewRating] = useState(0);
@@ -34,7 +39,9 @@ export default function Home() {
     address: "",
     price_range: "€€",
     status: "da_provare",
-    notes: ""
+    notes: "",
+    recommended_by: "",
+    occasion: "🍔 Sfondamento tra amici"
   });
 
   function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -100,14 +107,12 @@ export default function Home() {
     }
   }
 
-  // Apri il popup nuvoletta per votare/modificare pensieri
   function openReviewModal(r) {
     setReviewModalData(r);
     setReviewRating(r.rating || 0);
     setReviewNotes(r.notes || "");
   }
 
-  // Salva voto e pensieri su Supabase
   async function handleSaveReview(e) {
     e.preventDefault();
     if (!reviewModalData) return;
@@ -117,7 +122,7 @@ export default function Home() {
       .update({
         rating: reviewRating > 0 ? reviewRating : null,
         notes: reviewNotes,
-        status: "provato" // Quando lasci la recensione passa in automatico a provato!
+        status: "provato"
       })
       .eq("id", reviewModalData.id);
 
@@ -134,7 +139,7 @@ export default function Home() {
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city || !formData.address) {
-      alert("Compila tutti i campi obbligatori (incluso via e civico)!");
+      alert("Compila nome, città e indirizzo completo!");
       return;
     }
 
@@ -179,13 +184,50 @@ export default function Home() {
         address: "",
         price_range: "€€",
         status: "da_provare",
-        notes: ""
+        notes: "",
+        recommended_by: "",
+        occasion: "🍔 Sfondamento tra amici"
       });
       setShowModal(false);
       setSuccessToast("Locale salvato con precisione! 📍");
       setTimeout(() => setSuccessToast(""), 3500);
       fetchRestaurants();
     }
+  }
+
+  // Gira la Roulette
+  function spinRoulette() {
+    if (filtered.length === 0) {
+      alert("Nessun locale disponibile con i filtri attuali!");
+      return;
+    }
+    setIsSpinning(true);
+    setTimeout(() => {
+      const random = filtered[Math.floor(Math.random() * filtered.length)];
+      setRouletteWinner(random);
+      setIsSpinning(false);
+    }, 800);
+  }
+
+  // Prepara link messaggio WhatsApp
+  function getWhatsAppUrl(r) {
+    const distText = r.distKm ? `📍 A ${r.distKm} km da noi\n` : "";
+    const starsText = r.rating ? `⭐ Voto: ${r.rating}/5\n` : "";
+    const recText = r.recommended_by ? `👤 Consigliato da: ${r.recommended_by}\n` : "";
+    const occasionText = r.occasion ? `🏷️ Serata: ${r.occasion}\n` : "";
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      (r.address ? r.address + " " : "") + r.name + " " + r.city
+    )}`;
+
+    const text = 
+`🍕 *Ragazzi, stasera vi andrebbe questo?*
+
+🍴 *${r.name}* (${r.category} - ${r.price_range})
+🏙️ ${r.city}${r.address ? `, ${r.address}` : ""}
+${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.notes}"\n` : ""}
+🗺️ *Mappe:* ${mapsUrl}`;
+
+    return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
   }
 
   const restaurantsWithDist = useMemo(() => {
@@ -276,7 +318,7 @@ export default function Home() {
                 CIBOZZO • GRANDI VIAGGI
               </h1>
               <p className="text-xs text-[#7D3C4D] mt-1 font-sans">
-                Mostra <strong>esclusivamente</strong> i locali a più di 300 km da te.
+                I locali a più di 300 km da te per i grandi viaggi con gli amici.
               </p>
             </div>
 
@@ -374,20 +416,17 @@ export default function Home() {
                       <span>•</span>
                       <span className="font-bold">{r.price_range}</span>
 
-                      {/* TASTO NUVOLETTA PENSIERI */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           openReviewModal(r);
                         }}
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#581825]/10 hover:bg-[#581825] text-[#581825] hover:text-[#F4EFEA] text-[11px] font-bold transition cursor-pointer"
-                        title="Aggiungi o modifica i tuoi pensieri e stellozze"
                       >
                         <MessageSquarePlus className="h-3 w-3" />
                         <span>I miei pensieri</span>
                       </button>
 
-                      {/* Stellozze se presenti */}
                       {r.rating && (
                         <div className="flex items-center gap-0.5 text-amber-500 font-bold text-xs ml-1">
                           {[...Array(r.rating)].map((_, i) => (
@@ -396,6 +435,31 @@ export default function Home() {
                         </div>
                       )}
                     </div>
+
+                    {/* CHI L'HA CONSIGLIATO CON IL ROAST "PROSSIMA VOLTA EVITA" */}
+                    {r.recommended_by && (
+                      <div className="mt-2.5">
+                        {r.rating && r.rating <= 2 ? (
+                          <span className="text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                            💀 Consigliato da {r.recommended_by} - Prossima volta evita!
+                          </span>
+                        ) : r.rating && r.rating >= 4 ? (
+                          <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                            👑 Consigliato da {r.recommended_by} - Colpo da maestro!
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-[#7D3C4D] bg-[#E7DFD5]/60 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                            🕵️ Scovato da {r.recommended_by}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {r.occasion && (
+                      <div className="mt-1 text-[11px] font-medium text-[#7D3C4D]">
+                        {r.occasion}
+                      </div>
+                    )}
 
                     <div className="text-xs text-[#7D3C4D] mt-2 flex items-center gap-1">
                       <MapPin className="h-3.5 w-3.5 text-[#581825] shrink-0" />
@@ -410,25 +474,37 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs">
+                  <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs gap-2">
                     {r.distKm !== null ? (
                       <span className="font-mono font-bold text-[#8B263E] bg-[#581825]/10 px-2 py-0.5 rounded-md">
-                        ✈️ {r.distKm} km da te
+                        ✈️ {r.distKm} km
                       </span>
                     ) : (
                       <span className="text-[#A56B77]">Distanza da definire</span>
                     )}
 
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        (r.address ? r.address + " " : "") + r.name + " " + r.city
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
-                    >
-                      Mappe <ExternalLink className="h-3 w-3" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={getWhatsAppUrl(r)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition"
+                        title="Proponi questo locale sul gruppo WhatsApp"
+                      >
+                        <Send className="h-3 w-3" /> WhatsApp
+                      </a>
+
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                          (r.address ? r.address + " " : "") + r.name + " " + r.city
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
+                      >
+                        Mappe <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -456,7 +532,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Header */}
+        {/* Header con Tasto ROULETTE */}
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
             <h1 className="text-3xl font-extrabold flex items-center gap-2 text-amber-400">
@@ -464,23 +540,35 @@ export default function Home() {
             </h1>
             <p className="text-sm text-slate-400 mt-1">Radar gastronomico intelligente</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {/* TASTO ROULETTE */}
+            <button
+              onClick={spinRoulette}
+              disabled={isSpinning}
+              className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition shadow-lg shadow-purple-600/30 cursor-pointer"
+              title="Estrai un locale a caso tra quelli filtrati"
+            >
+              <Dices className={`h-4 w-4 ${isSpinning ? "animate-spin" : ""}`} />
+              {isSpinning ? "Scelta in corso..." : "Roulette Stasera"}
+            </button>
+
             <button
               onClick={handleGetLocation}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
                 userLocation
                   ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30"
                   : "bg-slate-800 hover:bg-slate-700 text-slate-200"
               }`}
             >
-              <Navigation className="h-4 w-4" />
+              <Navigation className="h-3.5 w-3.5" />
               {locating ? "Localizzo..." : userLocation ? "Posizione Attiva" : "Attiva Posizione"}
             </button>
+
             <button
               onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-sm transition shadow-lg shadow-amber-500/20 cursor-pointer"
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-amber-500/20 cursor-pointer"
             >
-              <Plus className="h-4 w-4" /> Aggiungi Locale
+              <Plus className="h-3.5 w-3.5" /> Aggiungi Locale
             </button>
           </div>
         </header>
@@ -663,20 +751,17 @@ export default function Home() {
                     <span>•</span>
                     <span className="text-amber-300 font-mono font-semibold">{r.price_range}</span>
 
-                    {/* TASTO NUVOLETTA PENSIERI */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         openReviewModal(r);
                       }}
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400/10 hover:bg-amber-400 hover:text-slate-950 text-amber-400 text-[11px] font-semibold border border-amber-400/20 transition cursor-pointer"
-                      title="Aggiungi o modifica i tuoi pensieri e stellozze"
                     >
                       <MessageSquarePlus className="h-3 w-3" />
                       <span>I miei pensieri</span>
                     </button>
 
-                    {/* Stellozze se presenti */}
                     {r.rating && (
                       <div className="flex items-center gap-0.5 text-amber-400 font-bold text-xs ml-1">
                         {[...Array(r.rating)].map((_, i) => (
@@ -685,6 +770,31 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+
+                  {/* CHI L'HA CONSIGLIATO CON IL ROAST "PROSSIMA VOLTA EVITA" */}
+                  {r.recommended_by && (
+                    <div className="mt-2.5">
+                      {r.rating && r.rating <= 2 ? (
+                        <span className="text-[10px] font-bold bg-rose-950/80 text-rose-300 border border-rose-800/80 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          💀 Consigliato da {r.recommended_by} - Prossima volta evita!
+                        </span>
+                      ) : r.rating && r.rating >= 4 ? (
+                        <span className="text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          👑 Consigliato da {r.recommended_by} - Colpo da maestro!
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                          🕵️ Scovato da {r.recommended_by}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {r.occasion && (
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      {r.occasion}
+                    </div>
+                  )}
 
                   <div className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
                     <MapPin className="h-3.5 w-3.5 text-amber-400/80 shrink-0" />
@@ -699,26 +809,81 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
+                <div className="flex items-center justify-between pt-3 border-t border-slate-800/60 text-xs gap-2">
                   {r.distKm !== null ? (
-                    <span className="text-emerald-400 font-mono font-bold">📍 {r.distKm} km da te</span>
+                    <span className="text-emerald-400 font-mono font-bold">📍 {r.distKm} km</span>
                   ) : (
                     <span className="text-slate-500 italic">Distanza in attesa</span>
                   )}
 
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                      (r.address ? r.address + " " : "") + r.name + " " + r.city
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-amber-400 hover:underline"
-                  >
-                    Mappe <ExternalLink className="h-3 w-3" />
-                  </a>
+                  <div className="flex items-center gap-2">
+                    {/* TASTO CONDIVIDI WHATSAPP */}
+                    <a
+                      href={getWhatsAppUrl(r)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 bg-emerald-600/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 border border-emerald-500/30 font-bold px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer"
+                      title="Proponi questo locale sul gruppo WhatsApp"
+                    >
+                      <Send className="h-3 w-3" /> WhatsApp
+                    </a>
+
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        (r.address ? r.address + " " : "") + r.name + " " + r.city
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-amber-400 hover:underline"
+                    >
+                      Mappe <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* POPUP ROULETTE DEL SABATO SERA 🎲 */}
+        {rouletteWinner && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
+            <div className="bg-slate-900 border-2 border-purple-500 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl relative text-center">
+              <div className="w-16 h-16 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-purple-500/20">
+                <Sparkles className="h-8 w-8 animate-bounce" />
+              </div>
+
+              <div>
+                <span className="text-[11px] uppercase font-black text-purple-400 tracking-wider">La Roulette ha deciso:</span>
+                <h2 className="text-2xl font-black text-white mt-1">{rouletteWinner.name}</h2>
+                <p className="text-xs text-slate-300 mt-1">
+                  {rouletteWinner.category} • {rouletteWinner.price_range} • {rouletteWinner.city}
+                </p>
+                {rouletteWinner.distKm && (
+                  <p className="text-xs text-emerald-400 font-mono mt-1 font-bold">📍 A {rouletteWinner.distKm} km da voi</p>
+                )}
+                {rouletteWinner.recommended_by && (
+                  <p className="text-xs text-slate-400 mt-1">Consigliato in origine da <strong>{rouletteWinner.recommended_by}</strong></p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <a
+                  href={getWhatsAppUrl(rouletteWinner)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-500/20"
+                >
+                  <Send className="h-4 w-4" /> Spedisci la decisione su WhatsApp!
+                </a>
+                <button
+                  onClick={() => setRouletteWinner(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Chiudi
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -729,11 +894,10 @@ export default function Home() {
               <div>
                 <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">La tua recensione</span>
                 <h2 className="text-xl font-black text-white mt-0.5">{reviewModalData.name}</h2>
-                <p className="text-xs text-slate-400">Lascia le tue stellozze e i piatti che ti sono rimasti nel cuore!</p>
+                <p className="text-xs text-slate-400">Lascia le stellozze e assegna la gloria o la colpa!</p>
               </div>
 
               <form onSubmit={handleSaveReview} className="space-y-4">
-                {/* 5 Stellozze interattive */}
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1.5">
                     Quante stellozze merita? {reviewRating > 0 && <span className="text-amber-400 font-bold">({reviewRating}/5)</span>}
@@ -757,27 +921,22 @@ export default function Home() {
                         />
                       </button>
                     ))}
-                    {reviewRating > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setReviewRating(0)}
-                        className="text-[10px] text-slate-500 hover:text-slate-300 underline ml-2 cursor-pointer"
-                      >
-                        Azzera
-                      </button>
-                    )}
                   </div>
+                  {reviewRating > 0 && reviewRating <= 2 && (
+                    <p className="text-[11px] text-rose-400 font-bold mt-1.5">
+                      💀 Meno di 3 stelle! Scatterà il "Prossima volta evita"!
+                    </p>
+                  )}
                 </div>
 
-                {/* Nuvoletta Pensieri */}
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1">
-                    I tuoi pensieri (consigli, atmosfera, piatti top)
+                    I tuoi pensieri (consigli, atmosfera, piatti)
                   </label>
                   <textarea
                     rows={4}
                     required
-                    placeholder="es. Bistecca tenerissima, chiedete il tavolo in terrazza! Prezzo un po' alto ma merita tutto..."
+                    placeholder="es. Bistecca tenerissima, vino top... oppure: posto da dimenticare!"
                     value={reviewNotes}
                     onChange={(e) => setReviewNotes(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-400 shadow-inner"
@@ -804,10 +963,10 @@ export default function Home() {
           </div>
         )}
 
-        {/* Modal Aggiungi Locale */}
+        {/* Modal Aggiungi Locale con Chi l'ha consigliato e Occasione */}
         {showModal && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-bold text-white">Aggiungi nuovo locale</h2>
               <form onSubmit={handleAddRestaurant} className="space-y-3">
                 <div>
@@ -815,7 +974,7 @@ export default function Home() {
                   <input
                     type="text"
                     required
-                    placeholder="es. I Due Cippi"
+                    placeholder="es. Da Ciro"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -823,11 +982,11 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="text-xs text-amber-400 font-semibold">Indirizzo (Via e Numero Civico) *</label>
+                  <label className="text-xs text-amber-400 font-semibold">Indirizzo (Via e Civico) *</label>
                   <input
                     type="text"
                     required
-                    placeholder="es. Piazza Vittorio Veneto 26"
+                    placeholder="es. Via dei Tribunali 32"
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                     className="w-full bg-slate-950 border border-amber-400/40 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400 shadow-inner"
@@ -836,11 +995,11 @@ export default function Home() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-slate-400">Città / Comune *</label>
+                    <label className="text-xs text-slate-400">Città *</label>
                     <input
                       type="text"
                       required
-                      placeholder="es. Saturnia"
+                      placeholder="es. Napoli"
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
@@ -851,12 +1010,40 @@ export default function Home() {
                     <input
                       type="text"
                       required
-                      placeholder="es. Ristorante toscano"
+                      placeholder="es. Pizzeria, Sushi"
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
                     />
                   </div>
+                </div>
+
+                {/* CHI HA CONSIGLIATO IL LOCALE */}
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold">Chi l'ha consigliato? (Nome amico)</label>
+                  <input
+                    type="text"
+                    placeholder="es. Andrea, Luca, Marco..."
+                    value={formData.recommended_by}
+                    onChange={(e) => setFormData({ ...formData, recommended_by: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                {/* OCCASIONE DELLA SERATA */}
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold">Che tipo di serata è?</label>
+                  <select
+                    value={formData.occasion}
+                    onChange={(e) => setFormData({ ...formData, occasion: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1"
+                  >
+                    <option value="🍔 Sfondamento tra amici">🍔 Sfondamento tra amici</option>
+                    <option value="🍻 Birretta / Aperitivo al volo">🍻 Birretta / Aperitivo al volo</option>
+                    <option value="🍷 Cena elegante">🍷 Cena elegante</option>
+                    <option value="☀️ Pranzo della domenica">☀️ Pranzo della domenica</option>
+                    <option value="🍕 Pizza ignorante">🍕 Pizza ignorante</option>
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -886,10 +1073,10 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-400">Note iniziali (opzionale)</label>
+                  <label className="text-xs text-slate-400">Note iniziali</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Visto su Instagram, piatto da provare assolutamente..."
+                    placeholder="es. Piatto consigliato, visto su IG..."
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
