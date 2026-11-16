@@ -6,7 +6,7 @@ import {
   MapPin, Utensils, Navigation, Plus, ExternalLink, 
   SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle, 
   MoreVertical, Trash2, Globe, Star, MessageSquarePlus, 
-  MessageSquareQuote, Dices, Send, Sparkles, User, LogOut, Check
+  MessageSquareQuote, Dices, Send, Sparkles, User, LogOut, Clock, Plane
 } from "lucide-react";
 
 const AVATAR_LIST = ["🍕", "🍔", "🍣", "🌮", "🍝", "🥩", "🍺", "🍷", "👑", "👨‍🍳", "🦁", "🚀", "🏎️", "🎯", "💀", "🤠"];
@@ -30,7 +30,9 @@ export default function Home() {
   const [profileUsername, setProfileUsername] = useState("");
   const [profileAvatar, setProfileAvatar] = useState("🍕");
 
-  // Roulette
+  // Roulette con scelta Budget
+  const [showRouletteConfig, setShowRouletteConfig] = useState(false);
+  const [rouletteBudget, setRouletteBudget] = useState("tutti"); // "tutti", "€", "€€", "€€€"
   const [rouletteWinner, setRouletteWinner] = useState(null);
   const [isSpinning, setIsSpinning] = useState(false);
 
@@ -53,7 +55,6 @@ export default function Home() {
     occasion: "🍔 Sfondamento tra amici"
   });
 
-  // Carica utente da LocalStorage all'avvio
   useEffect(() => {
     const savedUser = localStorage.getItem("cibozzo_user");
     if (savedUser) {
@@ -82,6 +83,16 @@ export default function Home() {
         Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return parseFloat((R * c).toFixed(1));
+  }
+
+  // Calcolo tempo di viaggio in auto o aereo
+  function getTravelEstimate(km) {
+    if (!km) return null;
+    if (km > 650) return { type: "plane", text: "✈️ Volo / Treno rapido consigliato" };
+    const totalMinutes = Math.round((km / 90) * 60); // Media 90 km/h con pause
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return { type: "car", text: `🚗 ~${h}h ${m > 0 ? `${m}m` : ""} di viaggio` };
   }
 
   async function fetchRestaurants() {
@@ -118,7 +129,6 @@ export default function Home() {
     );
   }
 
-  // Gestione Profilo Utente
   async function handleSaveProfile(e) {
     e.preventDefault();
     if (!profileUsername.trim()) return;
@@ -126,7 +136,6 @@ export default function Home() {
     const trimmed = profileUsername.trim();
     const userObj = { username: trimmed, avatar: profileAvatar };
 
-    // Salva o aggiorna profilo su Supabase
     await supabase.from("profiles").upsert(
       { username: trimmed, avatar: profileAvatar },
       { onConflict: "username" }
@@ -141,7 +150,7 @@ export default function Home() {
     }));
 
     setShowProfileModal(false);
-    setSuccessToast(`Benvenuto, ${userObj.avatar} ${userObj.username}! 🎉`);
+    setSuccessToast(`Profilo attivo: ${userObj.avatar} ${userObj.username}!`);
     setTimeout(() => setSuccessToast(""), 3500);
   }
 
@@ -302,35 +311,34 @@ export default function Home() {
       });
   }, [restaurantsWithDist, selectedCategory, selectedStatus, userLocation, maxDistance, isUnlimitedView]);
 
-  // ROULETTE RIGOROSA: SEGUE FERMAMENTE IL RANGE KM DELLO SLIDER
-  function spinRoulette() {
-    if (!userLocation) {
-      alert("📍 Attiva prima la posizione GPS, altrimenti non posso calcolare quali locali sono nel tuo raggio di km!");
-      handleGetLocation();
-      return;
-    }
-
-    // Filtra candidati RIGOROSAMENTE entro il range di km
-    const pool = restaurantsWithDist.filter((r) => {
+  // Candidati per la Roulette filtrati per Km e per Budget scelto
+  const roulettePool = useMemo(() => {
+    if (!userLocation) return [];
+    return restaurantsWithDist.filter((r) => {
       const matchCategory =
         selectedCategory === "Tutte" ||
         r.category.trim().toLowerCase() === selectedCategory.trim().toLowerCase();
       const matchStatus = selectedStatus === "tutti" || r.status === selectedStatus;
       const matchDist = r.distKm !== null && r.distKm <= maxDistance;
+      const matchBudget = rouletteBudget === "tutti" || r.price_range === rouletteBudget;
 
-      return matchCategory && matchStatus && matchDist;
+      return matchCategory && matchStatus && matchDist && matchBudget;
     });
+  }, [restaurantsWithDist, userLocation, selectedCategory, selectedStatus, maxDistance, rouletteBudget]);
 
-    if (pool.length === 0) {
-      alert(`Nessun locale trovato nel raggio di ${maxDistance} km con questi filtri! Prova ad aumentare la barra del range.`);
+  // Avvia l'estrazione Roulette con Budget
+  function executeRouletteSpin() {
+    if (roulettePool.length === 0) {
+      alert(`Nessun locale trovato con budget "${rouletteBudget}" entro ${maxDistance} km!`);
       return;
     }
 
     setIsSpinning(true);
     setTimeout(() => {
-      const random = pool[Math.floor(Math.random() * pool.length)];
+      const random = roulettePool[Math.floor(Math.random() * roulettePool.length)];
       setRouletteWinner(random);
       setIsSpinning(false);
+      setShowRouletteConfig(false);
     }, 700);
   }
 
@@ -365,7 +373,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
   }, [restaurantsWithDist, userLocation, maxDistance, isUnlimitedView]);
 
   // ==========================================
-  // VISTA 2: BORDEAUX & PANNA SPORCA (> 300 KM)
+  // VISTA 2: BORDEAUX & PANNA SPORCA (> 300 KM) - ROAD TRIP
   // ==========================================
   if (isUnlimitedView) {
     return (
@@ -402,7 +410,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                 CIBOZZO • GRANDI VIAGGI
               </h1>
               <p className="text-xs text-[#7D3C4D] mt-1 font-sans">
-                I locali a più di 300 km da te per i grandi viaggi con gli amici.
+                I templi gastronomici a più di 300 km da te per road trip e weekend fuori.
               </p>
             </div>
 
@@ -416,7 +424,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
 
           {!userLocation && (
             <div className="bg-[#E7DFD5] p-3 rounded-xl text-xs font-sans text-[#581825] flex items-center justify-between">
-              <span>📍 Attiva la posizione per calcolare quali locali sono a oltre 300 km.</span>
+              <span>📍 Attiva la posizione per calcolare i tempi di viaggio e i km.</span>
               <button 
                 onClick={handleGetLocation} 
                 className="font-bold underline cursor-pointer"
@@ -452,143 +460,144 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
-              {filtered.map((r) => (
-                <div
-                  key={r.id}
-                  className="relative bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/30 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
-                >
-                  <div>
-                    <div className="flex justify-between items-start gap-2">
-                      <h3 className="font-serif font-bold text-lg text-[#581825]">{r.name}</h3>
-                      
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
-                          {r.status === "provato" ? "Provato" : "Da Provare"}
-                        </span>
+              {filtered.map((r) => {
+                const travelInfo = getTravelEstimate(r.distKm);
+
+                return (
+                  <div
+                    key={r.id}
+                    className="relative bg-[#FCFAF8] border-2 border-[#E7DFD5] hover:border-[#581825]/30 p-5 rounded-2xl flex flex-col justify-between gap-4 transition shadow-sm"
+                  >
+                    <div>
+                      <div className="flex justify-between items-start gap-2">
+                        <h3 className="font-serif font-bold text-lg text-[#581825]">{r.name}</h3>
                         
-                        <div className="relative">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveMenuId(activeMenuId === r.id ? null : r.id);
-                            }}
-                            className="p-1 rounded-lg hover:bg-[#E7DFD5] text-[#581825] transition cursor-pointer"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-full bg-[#581825]/10 text-[#581825] border border-[#581825]/20">
+                            {r.status === "provato" ? "Provato" : "Da Provare"}
+                          </span>
                           
-                          {activeMenuId === r.id && (
-                            <div className="absolute right-0 top-7 z-20 bg-white border border-[#E7DFD5] shadow-lg rounded-xl p-1 w-32">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteRestaurant(r.id, r.name);
-                                }}
-                                className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-bold transition cursor-pointer"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" /> Elimina
-                              </button>
-                            </div>
-                          )}
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(activeMenuId === r.id ? null : r.id);
+                              }}
+                              className="p-1 rounded-lg hover:bg-[#E7DFD5] text-[#581825] transition cursor-pointer"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+                            
+                            {activeMenuId === r.id && (
+                              <div className="absolute right-0 top-7 z-20 bg-white border border-[#E7DFD5] shadow-lg rounded-xl p-1 w-32">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteRestaurant(r.id, r.name);
+                                  }}
+                                  className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-bold transition cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" /> Elimina
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1.5 font-medium flex-wrap">
-                      <span>{r.category}</span>
-                      <span>•</span>
-                      <span className="font-bold">{r.price_range}</span>
+                      <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1.5 font-medium flex-wrap">
+                        <span>{r.category}</span>
+                        <span>•</span>
+                        <span className="font-bold">{r.price_range}</span>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openReviewModal(r);
-                        }}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#581825]/10 hover:bg-[#581825] text-[#581825] hover:text-[#F4EFEA] text-[11px] font-bold transition cursor-pointer"
-                      >
-                        <MessageSquarePlus className="h-3 w-3" />
-                        <span>I miei pensieri</span>
-                      </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openReviewModal(r);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#581825]/10 hover:bg-[#581825] text-[#581825] hover:text-[#F4EFEA] text-[11px] font-bold transition cursor-pointer"
+                        >
+                          <MessageSquarePlus className="h-3 w-3" />
+                          <span>I miei pensieri</span>
+                        </button>
 
-                      {r.rating && (
-                        <div className="flex items-center gap-0.5 text-amber-500 font-bold text-xs ml-1">
-                          {[...Array(r.rating)].map((_, i) => (
-                            <Star key={i} className="h-3.5 w-3.5 fill-amber-500" />
-                          ))}
+                        {r.rating && (
+                          <div className="flex items-center gap-0.5 text-amber-500 font-bold text-xs ml-1">
+                            {[...Array(r.rating)].map((_, i) => (
+                              <Star key={i} className="h-3.5 w-3.5 fill-amber-500" />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* STIMA TEMPO DI VIAGGIO ON THE ROAD */}
+                      {travelInfo && (
+                        <div className="mt-2.5 inline-flex items-center gap-1.5 bg-[#581825]/10 border border-[#581825]/20 text-[#581825] px-2.5 py-1 rounded-lg text-xs font-bold font-mono">
+                          {travelInfo.text}
                         </div>
+                      )}
+
+                      {r.recommended_by && (
+                        <div className="mt-2">
+                          {r.rating && r.rating <= 2 ? (
+                            <span className="text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              💀 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Prossima volta evita!
+                            </span>
+                          ) : r.rating && r.rating >= 4 ? (
+                            <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              👑 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Colpo da maestro!
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[#7D3C4D] bg-[#E7DFD5]/60 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              🕵️ Scovato da {r.user_avatar || "🍕"} {r.recommended_by}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="text-xs text-[#7D3C4D] mt-2 flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5 text-[#581825] shrink-0" />
+                        <span>{r.address ? `${r.address}, ${r.city}` : r.city}</span>
+                      </div>
+
+                      {r.notes && (
+                        <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif flex items-start gap-1.5">
+                          <MessageSquareQuote className="h-3.5 w-3.5 text-[#581825] shrink-0 mt-0.5" />
+                          <span>"{r.notes}"</span>
+                        </p>
                       )}
                     </div>
 
-                    {r.recommended_by && (
-                      <div className="mt-2.5">
-                        {r.rating && r.rating <= 2 ? (
-                          <span className="text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                            💀 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Prossima volta evita!
-                          </span>
-                        ) : r.rating && r.rating >= 4 ? (
-                          <span className="text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                            👑 Consigliato da {r.user_avatar || "🍕"} {r.recommended_by} - Colpo da maestro!
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-[#7D3C4D] bg-[#E7DFD5]/60 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                            🕵️ Scovato da {r.user_avatar || "🍕"} {r.recommended_by}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {r.occasion && (
-                      <div className="mt-1 text-[11px] font-medium text-[#7D3C4D]">
-                        {r.occasion}
-                      </div>
-                    )}
-
-                    <div className="text-xs text-[#7D3C4D] mt-2 flex items-center gap-1">
-                      <MapPin className="h-3.5 w-3.5 text-[#581825] shrink-0" />
-                      <span>{r.address ? `${r.address}, ${r.city}` : r.city}</span>
-                    </div>
-
-                    {r.notes && (
-                      <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif flex items-start gap-1.5">
-                        <MessageSquareQuote className="h-3.5 w-3.5 text-[#581825] shrink-0 mt-0.5" />
-                        <span>"{r.notes}"</span>
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs gap-2">
-                    {r.distKm !== null ? (
+                    <div className="flex items-center justify-between pt-3 border-t border-[#E7DFD5] text-xs gap-2">
                       <span className="font-mono font-bold text-[#8B263E] bg-[#581825]/10 px-2 py-0.5 rounded-md">
                         ✈️ {r.distKm} km
                       </span>
-                    ) : (
-                      <span className="text-[#A56B77]">Distanza da definire</span>
-                    )}
 
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={getWhatsAppUrl(r)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition"
-                      >
-                        <Send className="h-3 w-3" /> WhatsApp
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={getWhatsAppUrl(r)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition"
+                        >
+                          <Send className="h-3 w-3" /> WhatsApp
+                        </a>
 
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                          (r.address ? r.address + " " : "") + r.name + " " + r.city
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
-                      >
-                        Mappe <ExternalLink className="h-3 w-3" />
-                      </a>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                            (r.address ? r.address + " " : "") + r.name + " " + r.city
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-[#581825] font-bold hover:underline"
+                        >
+                          Mappe <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -613,7 +622,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
           </div>
         )}
 
-        {/* Header con Profilo Utente + Roulette */}
+        {/* Header con Profilo + Tasto ROULETTE */}
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
             <div className="flex items-center gap-3">
@@ -621,7 +630,6 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                 <Utensils className="h-8 w-8" /> CIBOZZO
               </h1>
 
-              {/* PULSANTE PROFILO / AVATAR */}
               {currentUser ? (
                 <div 
                   onClick={() => {
@@ -630,7 +638,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                     setShowProfileModal(true);
                   }}
                   className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 hover:border-amber-400 px-2.5 py-1 rounded-full cursor-pointer transition"
-                  title="Modifica il tuo avatar"
+                  title="Modifica avatar o profilo"
                 >
                   <span className="text-base">{currentUser.avatar}</span>
                   <span className="text-xs font-bold text-slate-200">{currentUser.username}</span>
@@ -648,15 +656,21 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {/* TASTO ROULETTE RIGOROSA */}
+            {/* TASTO ROULETTE CON SCELTA BUDGET */}
             <button
-              onClick={spinRoulette}
-              disabled={isSpinning}
+              onClick={() => {
+                if (!userLocation) {
+                  alert("📍 Attiva prima la posizione GPS per usare la Roulette!");
+                  handleGetLocation();
+                  return;
+                }
+                setShowRouletteConfig(true);
+              }}
               className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition shadow-lg shadow-purple-600/30 cursor-pointer"
-              title={`Estrai tra i locali entro ${maxDistance} km`}
+              title="Apri Roulette con scelta del budget"
             >
-              <Dices className={`h-4 w-4 ${isSpinning ? "animate-spin" : ""}`} />
-              {isSpinning ? "Giro la ruota..." : `Roulette (Entro ${maxDistance}km)`}
+              <Dices className="h-4 w-4" />
+              Roulette Stasera 🎲
             </button>
 
             <button
@@ -878,7 +892,6 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                     )}
                   </div>
 
-                  {/* CHI L'HA CONSIGLIATO CON AVATAR E ROAST */}
                   {r.recommended_by && (
                     <div className="mt-2.5">
                       {r.rating && r.rating <= 2 ? (
@@ -947,6 +960,122 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* MODAL CONFIGURAZIONE ROULETTE (CON SCELTA BUDGET) 🎲💶 */}
+        {showRouletteConfig && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-purple-500/40 rounded-3xl p-6 w-full max-w-sm space-y-5 shadow-2xl relative">
+              <div className="text-center">
+                <div className="w-12 h-12 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                  <Dices className="h-6 w-6" />
+                </div>
+                <h2 className="text-xl font-black text-white">Roulette del Sabato Sera</h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Raggio impostato: <strong className="text-amber-400">{maxDistance} km</strong>
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-2 text-center">
+                  Che budget abbiamo stasera? 💶
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { id: "tutti", label: "Tutti" },
+                    { id: "€", label: "€" },
+                    { id: "€€", label: "€€" },
+                    { id: "€€€", label: "€€€" }
+                  ].map((b) => (
+                    <button
+                      type="button"
+                      key={b.id}
+                      onClick={() => setRouletteBudget(b.id)}
+                      className={`py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                        rouletteBudget === b.id
+                          ? "bg-purple-600 border-purple-400 text-white shadow-lg shadow-purple-600/30"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 text-center">
+                <span className="text-xs text-slate-400">Locali disponibili trovati:</span>
+                <div className="text-lg font-black text-purple-400 mt-0.5">
+                  {roulettePool.length} {roulettePool.length === 1 ? "locale" : "locali"}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowRouletteConfig(false)}
+                  className="w-1/3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={executeRouletteSpin}
+                  disabled={roulettePool.length === 0 || isSpinning}
+                  className="w-2/3 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-lg shadow-purple-600/30 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {isSpinning ? "Estrazione..." : "GIRA LA RUOTA!"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP VINCITORE ROULETTE 🎲 */}
+        {rouletteWinner && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
+            <div className="bg-slate-900 border-2 border-purple-500 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl relative text-center">
+              <div className="w-16 h-16 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-purple-500/20">
+                <Sparkles className="h-8 w-8 animate-bounce" />
+              </div>
+
+              <div>
+                <span className="text-[11px] uppercase font-black text-purple-400 tracking-wider">
+                  Entro {maxDistance} km ({rouletteBudget === "tutti" ? "Tutti i prezzi" : `Fascia ${rouletteBudget}`}) la Roulette ha deciso:
+                </span>
+                <h2 className="text-2xl font-black text-white mt-1">{rouletteWinner.name}</h2>
+                <p className="text-xs text-slate-300 mt-1">
+                  {rouletteWinner.category} • <strong className="text-amber-400">{rouletteWinner.price_range}</strong> • {rouletteWinner.city}
+                </p>
+                {rouletteWinner.distKm && (
+                  <p className="text-sm text-emerald-400 font-mono mt-2 font-bold">📍 A soli {rouletteWinner.distKm} km da voi!</p>
+                )}
+                {rouletteWinner.recommended_by && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    Consigliato da {rouletteWinner.user_avatar || "🍕"} <strong>{rouletteWinner.recommended_by}</strong>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <a
+                  href={getWhatsAppUrl(rouletteWinner)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-500/20"
+                >
+                  <Send className="h-4 w-4" /> Spedisci la sentenza su WhatsApp!
+                </a>
+                <button
+                  onClick={() => setRouletteWinner(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Chiudi
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1026,52 +1155,6 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
           </div>
         )}
 
-        {/* POPUP ROULETTE DEL SABATO SERA (RIGOROSA SUI KM) 🎲 */}
-        {rouletteWinner && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
-            <div className="bg-slate-900 border-2 border-purple-500 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl relative text-center">
-              <div className="w-16 h-16 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-purple-500/20">
-                <Sparkles className="h-8 w-8 animate-bounce" />
-              </div>
-
-              <div>
-                <span className="text-[11px] uppercase font-black text-purple-400 tracking-wider">
-                  Entro {maxDistance} km la Roulette ha scelto:
-                </span>
-                <h2 className="text-2xl font-black text-white mt-1">{rouletteWinner.name}</h2>
-                <p className="text-xs text-slate-300 mt-1">
-                  {rouletteWinner.category} • {rouletteWinner.price_range} • {rouletteWinner.city}
-                </p>
-                {rouletteWinner.distKm && (
-                  <p className="text-sm text-emerald-400 font-mono mt-2 font-bold">📍 A soli {rouletteWinner.distKm} km da voi!</p>
-                )}
-                {rouletteWinner.recommended_by && (
-                  <p className="text-xs text-slate-400 mt-1">
-                    Consigliato da {rouletteWinner.user_avatar || "🍕"} <strong>{rouletteWinner.recommended_by}</strong>
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2 pt-2">
-                <a
-                  href={getWhatsAppUrl(rouletteWinner)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-500/20"
-                >
-                  <Send className="h-4 w-4" /> Condividi la sentenza su WhatsApp!
-                </a>
-                <button
-                  onClick={() => setRouletteWinner(null)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
-                >
-                  Chiudi
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* MODAL NUVOLETTA: PENSIERI & STELLOZZE ⭐ */}
         {reviewModalData && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -1121,7 +1204,7 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   <textarea
                     rows={4}
                     required
-                    placeholder="es. Bistecca incredibile! Oppure: servizio lentissimo e conto salato..."
+                    placeholder="es. Bistecca incredibile! Oppure: servizio lentissimo..."
                     value={reviewNotes}
                     onChange={(e) => setReviewNotes(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-400 shadow-inner"
@@ -1203,7 +1286,6 @@ ${distText}${starsText}${occasionText}${recText}${r.notes ? `💬 Note: "${r.not
                   </div>
                 </div>
 
-                {/* CONSIGLIATO DA (AUTOCOMPILATO SE LOGGATO) */}
                 <div>
                   <label className="text-xs text-slate-300 font-semibold flex items-center justify-between">
                     <span>Chi l'ha consigliato?</span>
