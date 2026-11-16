@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   MapPin, Utensils, Navigation, Plus, ExternalLink, 
   SlidersHorizontal, ArrowLeft, Compass, Car, CheckCircle, 
-  MoreVertical, Trash2, Globe
+  MoreVertical, Trash2, Globe, Star, MessageSquarePlus, MessageSquareQuote
 } from "lucide-react";
 
 export default function Home() {
@@ -20,6 +20,12 @@ export default function Home() {
   const [isUnlimitedView, setIsUnlimitedView] = useState(false);
   const [successToast, setSuccessToast] = useState("");
   const [activeMenuId, setActiveMenuId] = useState(null);
+
+  // Popup Nuvoletta Recensione
+  const [reviewModalData, setReviewModalData] = useState(null);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [hoverRating, setHoverRating] = useState(0);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -94,7 +100,37 @@ export default function Home() {
     }
   }
 
-  // Geocodifica infallibile con indirizzo + città
+  // Apri il popup nuvoletta per votare/modificare pensieri
+  function openReviewModal(r) {
+    setReviewModalData(r);
+    setReviewRating(r.rating || 0);
+    setReviewNotes(r.notes || "");
+  }
+
+  // Salva voto e pensieri su Supabase
+  async function handleSaveReview(e) {
+    e.preventDefault();
+    if (!reviewModalData) return;
+
+    const { error } = await supabase
+      .from("restaurants")
+      .update({
+        rating: reviewRating > 0 ? reviewRating : null,
+        notes: reviewNotes,
+        status: "provato" // Quando lasci la recensione passa in automatico a provato!
+      })
+      .eq("id", reviewModalData.id);
+
+    if (!error) {
+      setSuccessToast(`Pensieri su "${reviewModalData.name}" salvati! ⭐`);
+      setTimeout(() => setSuccessToast(""), 3500);
+      setReviewModalData(null);
+      fetchRestaurants();
+    } else {
+      alert("Errore salvataggio recensione: " + error.message);
+    }
+  }
+
   async function handleAddRestaurant(e) {
     e.preventDefault();
     if (!formData.name || !formData.city || !formData.address) {
@@ -107,7 +143,6 @@ export default function Home() {
     let longitude = null;
 
     try {
-      // 1. Prova con Indirizzo completo + Città su OpenStreetMap
       const fullQuery = encodeURIComponent(`${formData.address}, ${formData.city}`);
       let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${fullQuery}`);
       let data = await res.json();
@@ -116,7 +151,6 @@ export default function Home() {
         latitude = parseFloat(data[0].lat);
         longitude = parseFloat(data[0].lon);
       } else {
-        // 2. Se il civico non viene trovato, cerca tramite il servizio veloce Open-Meteo sulla Città
         const cityClean = encodeURIComponent(formData.city.trim());
         const fallbackRes = await fetch(
           `https://geocoding-api.open-meteo.com/v1/search?name=${cityClean}&count=1&language=it&format=json`
@@ -127,9 +161,7 @@ export default function Home() {
           longitude = fallbackData.results[0].longitude;
         }
       }
-    } catch (err) {
-      console.log("Errore ricerca coordinate, continuo.");
-    }
+    } catch (err) {}
 
     const { error } = await supabase.from("restaurants").insert([
       { ...formData, latitude, longitude }
@@ -336,10 +368,33 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1 font-medium">
+                    {/* Prezzo + NUVOLETTA + Stellozze */}
+                    <div className="flex items-center gap-2 text-xs text-[#8B263E] mt-1.5 font-medium flex-wrap">
                       <span>{r.category}</span>
                       <span>•</span>
                       <span className="font-bold">{r.price_range}</span>
+
+                      {/* TASTO NUVOLETTA PENSIERI */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReviewModal(r);
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#581825]/10 hover:bg-[#581825] text-[#581825] hover:text-[#F4EFEA] text-[11px] font-bold transition cursor-pointer"
+                        title="Aggiungi o modifica i tuoi pensieri e stellozze"
+                      >
+                        <MessageSquarePlus className="h-3 w-3" />
+                        <span>I miei pensieri</span>
+                      </button>
+
+                      {/* Stellozze se presenti */}
+                      {r.rating && (
+                        <div className="flex items-center gap-0.5 text-amber-500 font-bold text-xs ml-1">
+                          {[...Array(r.rating)].map((_, i) => (
+                            <Star key={i} className="h-3.5 w-3.5 fill-amber-500" />
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="text-xs text-[#7D3C4D] mt-2 flex items-center gap-1">
@@ -348,8 +403,9 @@ export default function Home() {
                     </div>
 
                     {r.notes && (
-                      <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif">
-                        "{r.notes}"
+                      <p className="text-xs text-[#6B2F3D] bg-[#F4EFEA] p-3 rounded-xl border border-[#E7DFD5] mt-3 italic font-serif flex items-start gap-1.5">
+                        <MessageSquareQuote className="h-3.5 w-3.5 text-[#581825] shrink-0 mt-0.5" />
+                        <span>"{r.notes}"</span>
                       </p>
                     )}
                   </div>
@@ -601,10 +657,33 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
+                  {/* Prezzo + NUVOLETTA + Stellozze */}
+                  <div className="flex items-center gap-2 text-xs text-slate-400 mt-1.5 flex-wrap">
                     <span className="font-medium text-slate-300">{r.category}</span>
                     <span>•</span>
                     <span className="text-amber-300 font-mono font-semibold">{r.price_range}</span>
+
+                    {/* TASTO NUVOLETTA PENSIERI */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openReviewModal(r);
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400/10 hover:bg-amber-400 hover:text-slate-950 text-amber-400 text-[11px] font-semibold border border-amber-400/20 transition cursor-pointer"
+                      title="Aggiungi o modifica i tuoi pensieri e stellozze"
+                    >
+                      <MessageSquarePlus className="h-3 w-3" />
+                      <span>I miei pensieri</span>
+                    </button>
+
+                    {/* Stellozze se presenti */}
+                    {r.rating && (
+                      <div className="flex items-center gap-0.5 text-amber-400 font-bold text-xs ml-1">
+                        {[...Array(r.rating)].map((_, i) => (
+                          <Star key={i} className="h-3.5 w-3.5 fill-amber-400" />
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
@@ -613,8 +692,9 @@ export default function Home() {
                   </div>
 
                   {r.notes && (
-                    <p className="text-xs text-slate-400 bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/50 mt-3 italic">
-                      "{r.notes}"
+                    <p className="text-xs text-slate-400 bg-slate-950/40 p-2.5 rounded-lg border border-slate-800/50 mt-3 italic flex items-start gap-1.5">
+                      <MessageSquareQuote className="h-3.5 w-3.5 text-amber-400/70 shrink-0 mt-0.5" />
+                      <span>"{r.notes}"</span>
                     </p>
                   )}
                 </div>
@@ -642,7 +722,89 @@ export default function Home() {
           </div>
         )}
 
-        {/* Modal Aggiungi Locale con Via e Civico */}
+        {/* MODAL NUVOLETTA: PENSIERI & STELLOZZE ⭐ */}
+        {reviewModalData && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl relative">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">La tua recensione</span>
+                <h2 className="text-xl font-black text-white mt-0.5">{reviewModalData.name}</h2>
+                <p className="text-xs text-slate-400">Lascia le tue stellozze e i piatti che ti sono rimasti nel cuore!</p>
+              </div>
+
+              <form onSubmit={handleSaveReview} className="space-y-4">
+                {/* 5 Stellozze interattive */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Quante stellozze merita? {reviewRating > 0 && <span className="text-amber-400 font-bold">({reviewRating}/5)</span>}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        type="button"
+                        key={star}
+                        onClick={() => setReviewRating(star)}
+                        onMouseEnter={() => setHoverRating(star)}
+                        onMouseLeave={() => setHoverRating(0)}
+                        className="p-1 transition-transform hover:scale-125 cursor-pointer"
+                      >
+                        <Star 
+                          className={`h-7 w-7 transition-colors ${
+                            star <= (hoverRating || reviewRating)
+                              ? "fill-amber-400 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]"
+                              : "text-slate-700 hover:text-slate-500"
+                          }`} 
+                        />
+                      </button>
+                    ))}
+                    {reviewRating > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setReviewRating(0)}
+                        className="text-[10px] text-slate-500 hover:text-slate-300 underline ml-2 cursor-pointer"
+                      >
+                        Azzera
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Nuvoletta Pensieri */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                    I tuoi pensieri (consigli, atmosfera, piatti top)
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    placeholder="es. Bistecca tenerissima, chiedete il tavolo in terrazza! Prezzo un po' alto ma merita tutto..."
+                    value={reviewNotes}
+                    onChange={(e) => setReviewNotes(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-400 shadow-inner"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setReviewModalData(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                  >
+                    Annulla
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs shadow-lg shadow-amber-500/20 cursor-pointer"
+                  >
+                    Salva Pensieri ⭐
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Aggiungi Locale */}
         {showModal && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4">
@@ -660,7 +822,6 @@ export default function Home() {
                   />
                 </div>
 
-                {/* INDIRIZZO: VIA E CIVICO */}
                 <div>
                   <label className="text-xs text-amber-400 font-semibold">Indirizzo (Via e Numero Civico) *</label>
                   <input
@@ -725,10 +886,10 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-400">Note o piatto consigliato</label>
+                  <label className="text-xs text-slate-400">Note iniziali (opzionale)</label>
                   <textarea
                     rows={2}
-                    placeholder="es. Bistecca eccezionale e ottima carta vini"
+                    placeholder="es. Visto su Instagram, piatto da provare assolutamente..."
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-white mt-1 focus:outline-none focus:border-amber-400"
